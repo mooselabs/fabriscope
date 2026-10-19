@@ -9,21 +9,27 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 keywords = ["beads", "scrolls", "issues", "knowledge", "dashboard"]
 categories = ["command-line-utilities", "web-programming::http-server"]
-# Not on crates.io yet; the first release will publish it.
+# Released as GitHub release binaries (see README); not on crates.io.
 publish = false
 
 [dependencies]
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+flate2 = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+self-replace = "1"
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11"
+tar = { version = "0.4", default-features = false }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "net", "process", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 walkdir = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -31,3 +37,7 @@ libc = "0.2"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+strip = true
+lto = "thin"

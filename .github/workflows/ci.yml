@@ -21,3 +21,5 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
         run: cargo test --locked
+      - name: Lint the installer
+        run: shellcheck scripts/install.sh

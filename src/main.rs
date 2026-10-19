@@ -6,6 +6,7 @@ mod render;
 mod scrolls;
 mod serve;
 mod tools;
+mod update;
 
 use axum::{
     Router,
@@ -23,7 +24,7 @@ use std::{
     convert::Infallible,
     net::SocketAddr,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio::sync::{RwLock, watch};
@@ -31,8 +32,10 @@ use tokio_stream::{StreamExt, wrappers::WatchStream};
 use tools::Tool;
 
 const USAGE: &str = "Usage: fabriscope [--beads DIR | --beads-url URL] [--scrolls STORE] [options]
+       fabriscope update
 
-View a Beads store, a Scrolls store, or both, in a web browser.
+View a Beads store, a Scrolls store, or both, in a web browser. Release
+builds update themselves in the background; `fabriscope update` updates now.
 
   --beads DIR          A directory where `bd` finds the Beads store; Fabriscope
                        starts a private `bd serve` there
@@ -46,12 +49,16 @@ View a Beads store, a Scrolls store, or both, in a web browser.
   --bd PATH            The bd program (default: bd on PATH)
   --scrolls-bin PATH   The scrolls program (default: scrolls on PATH)
   --scrolls-dolt PATH  The Dolt binary Scrolls should use (passed as --dolt)
+  --no-update          Do not check for a new release (or set FABRISCOPE_NO_UPDATE=1)
+  -V, --version        Show the version
   -h, --help           Show this help";
 
 #[derive(Clone)]
 struct App {
     view: Arc<RwLock<View>>,
     updates: watch::Sender<u64>,
+    /// A newer release installed on disk by the background update check.
+    installed: Arc<Mutex<Option<String>>>,
 }
 
 impl App {
@@ -60,6 +67,7 @@ impl App {
         Self {
             view: Arc::new(RwLock::new(view)),
             updates,
+            installed: Arc::default(),
         }
     }
 
@@ -83,12 +91,24 @@ struct Config {
     bd: Option<PathBuf>,
     scrolls_bin: Option<PathBuf>,
     scrolls_dolt: Option<PathBuf>,
+    no_update: bool,
     help: bool,
+    version: bool,
+    /// `fabriscope update`: install a newer release now and exit.
+    update: bool,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> {
     let mut config = Config::default();
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().peekable();
+    if args.peek().map(String::as_str) == Some("update") {
+        args.next();
+        if let Some(extra) = args.next() {
+            return Err(format!("fabriscope update takes no arguments, not {extra}"));
+        }
+        config.update = true;
+        return Ok(config);
+    }
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value"));
         match arg.as_str() {
@@ -110,7 +130,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
             "--bd" => config.bd = Some(value("--bd")?.into()),
             "--scrolls-bin" => config.scrolls_bin = Some(value("--scrolls-bin")?.into()),
             "--scrolls-dolt" => config.scrolls_dolt = Some(value("--scrolls-dolt")?.into()),
+            "--no-update" => config.no_update = true,
             "--help" | "-h" => config.help = true,
+            "--version" | "-V" => config.version = true,
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -118,6 +140,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
         return Err("give --beads DIR or --beads-url URL, not both".into());
     }
     if !config.help
+        && !config.version
         && config.beads.is_none()
         && config.beads_url.is_none()
         && config.scrolls.is_none()
@@ -354,11 +377,21 @@ async fn health(State(app): State<App>) -> Response {
             "error": f.error,
         })
     });
+    let update = app
+        .installed
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|v| serde_json::json!({ "installed": v }));
     (
         status,
-        axum::Json(
-            serde_json::json!({ "revision": view.revision, "beads": beads, "scrolls": scrolls }),
-        ),
+        axum::Json(serde_json::json!({
+            "version": update::VERSION,
+            "update": update,
+            "revision": view.revision,
+            "beads": beads,
+            "scrolls": scrolls,
+        })),
     )
         .into_response()
 }
@@ -435,6 +468,13 @@ async fn run() -> Result<(), String> {
         println!("{USAGE}");
         return Ok(());
     }
+    if config.version {
+        println!("{}", update::version_line());
+        return Ok(());
+    }
+    if config.update {
+        return update_now().await;
+    }
     let beads_reader = beads_reader(&config).await?;
     let scrolls_store = config
         .scrolls
@@ -510,12 +550,33 @@ async fn run() -> Result<(), String> {
     if let (Some(tool), Some(store)) = (scrolls_tool, scrolls_store) {
         tokio::spawn(watch_scrolls(app.clone(), tool, store));
     }
+    if update::automatic(config.no_update) {
+        tokio::spawn(update::watch(app.installed.clone()));
+    }
     axum::serve(listener, router(app))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await
         .map_err(|e| e.to_string())
+}
+
+/// `fabriscope update`: install a newer release, if there is one, and exit.
+async fn update_now() -> Result<(), String> {
+    let current = semver::Version::parse(update::VERSION).map_err(|e| e.to_string())?;
+    let outcome = tokio::task::spawn_blocking(move || update::check_and_install(&current))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|failure| failure.message)?;
+    match outcome {
+        update::Outcome::Current(version) => {
+            println!("fabriscope {version} is the latest release.")
+        }
+        update::Outcome::Updated(version) => println!(
+            "fabriscope updated to {version}. Running servers keep the old version until they restart."
+        ),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -545,6 +606,21 @@ mod tests {
         assert!(args(&["--beads"]).is_err());
         assert!(args(&["--scrolls", "/tmp", "--bind", "nowhere"]).is_err());
         assert!(args(&["--frobnicate"]).is_err());
+    }
+
+    #[test]
+    fn version_and_update_need_no_store() {
+        assert!(args(&["--version"]).unwrap().version);
+        assert!(args(&["-V"]).unwrap().version);
+        assert!(args(&["update"]).unwrap().update);
+        assert!(args(&["update", "--now"]).is_err());
+        // `update` is a command only in first place, not a store path.
+        assert!(args(&["--scrolls", "/tmp", "update"]).is_err());
+        assert!(
+            args(&["--scrolls", "/tmp", "--no-update"])
+                .unwrap()
+                .no_update
+        );
     }
 
     #[test]
@@ -614,6 +690,8 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(json["beads"]["beads"], 0);
         assert!(json["scrolls"].is_null());
+        assert_eq!(json["version"], update::VERSION);
+        assert!(json["update"].is_null());
         app.update(|view| view.beads.as_mut().unwrap().error = Some("bd unreachable".into()))
             .await;
         let (status, _, body) = get(&app, "/healthz").await;

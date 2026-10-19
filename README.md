@@ -12,14 +12,38 @@ Pages update live while you watch.
 both *fabricate* (the work Beads track) and *fabric* (the woven text of
 Scrolls).
 
-## Quick start
+## Install
 
-You need Rust 1.85+ and the tools for the stores you want to see: `bd` for
-Beads, `scrolls` (and its Dolt binary) for Scrolls.
+On Linux (x86_64, arm64) or macOS (Intel, Apple Silicon):
 
 ```sh
-cargo install --locked --path .
+curl -fsSL https://raw.githubusercontent.com/mooselabs/fabriscope/main/scripts/install.sh | bash
+```
 
+This puts `fabriscope` in `~/.local/bin`, after checking the download
+against the release's `SHA256SUMS`. It installs nothing if the check fails.
+Settings, as environment variables for `bash`:
+
+| Variable | Meaning |
+| --- | --- |
+| `FABRISCOPE_VERSION` | A release tag to install, such as `v0.1.0`. Default: the latest. |
+| `FABRISCOPE_INSTALL_DIR` | Where to put the program. Default: `~/.local/bin`. |
+| `FABRISCOPE_RELEASES_URL` | Where releases are served. Default: this repository's GitHub releases. |
+
+For example, `curl -fsSL …/install.sh | FABRISCOPE_VERSION=v0.1.0 bash`.
+Each release's archives carry GitHub build attestations, which
+`gh attestation verify fabriscope-<target>.tar.gz -R mooselabs/fabriscope`
+checks.
+
+From source, with Rust 1.85+: `cargo install --locked --git https://github.com/mooselabs/fabriscope`
+(or `--path .` in a checkout). A source build does not update itself.
+
+## Quick start
+
+You need the tools for the stores you want to see: `bd` for Beads,
+`scrolls` (and its Dolt binary) for Scrolls.
+
+```sh
 # A Beads store: any directory where `bd` works. Fabriscope starts a
 # private `bd serve` there and stops it when it exits.
 fabriscope --beads ~/code/my-project
@@ -48,6 +72,30 @@ Open <http://127.0.0.1:8787>. Stop with Ctrl-C.
 | `--bd PATH` | The `bd` program. Default: `bd` on `PATH`. |
 | `--scrolls-bin PATH` | The `scrolls` program. Default: `scrolls` on `PATH`. |
 | `--scrolls-dolt PATH` | The Dolt binary Scrolls should use, passed as `--dolt`. |
+| `--no-update` | Do not check for a new release while running. |
+| `--version` | Print the version and the release target, then exit. |
+
+`fabriscope update` installs a newer release now, if there is one, and exits.
+
+## Updates
+
+A Fabriscope installed from a release keeps itself current, the way Claude
+Code does. Shortly after it starts, and then once a day, it asks GitHub for
+the latest release. If that release is newer, Fabriscope downloads it for
+the same platform, checks it against `SHA256SUMS` and checks that it runs,
+and then replaces its own program file in one step. The server keeps
+running the version it started with. It prints
+`fabriscope: updated to vX.Y.Z; restart to use it`, and `/healthz` shows
+`"update": {"installed": "X.Y.Z"}`. The next start runs the new version.
+
+- It never installs an older version or a pre-release.
+- A failed check prints one line and tries again the next day. It never
+  stops the server.
+- If it cannot write next to its own program (for example, an install in a
+  folder owned by root), it says so once and stops checking for that run.
+- To turn it off, pass `--no-update` or set `FABRISCOPE_NO_UPDATE=1`.
+- A source build (`cargo install`) never updates itself.
+  `FABRISCOPE_TARGET=<target>` at run time makes one follow releases.
 
 ## What you see
 
@@ -137,7 +185,8 @@ Content Security Policy.
 
 ## Health
 
-`GET /healthz` returns JSON with, for each store shown, when it was last read,
+`GET /healthz` returns JSON with the running version, any newer version
+installed by the updater, and, for each store shown, when it was last read,
 its commit or Dolt revision, record counts and the last error.
 
 ## Development
@@ -151,7 +200,26 @@ cargo test --locked
 `tests/live.rs` runs the real binary against fake `bd` and `scrolls` programs
 and a fake Beads API. It checks the pages, reading through a private
 `bd serve`, the fallback to `bd export`, attaching to a running server with a
-token, a live refresh, and that a failed read keeps the last good data.
+token, a live refresh, and that a failed read keeps the last good data. It
+also runs copies of the binary against a fake GitHub release. These check
+`fabriscope update`, the background update, the opt-out, and that a bad
+checksum or a wrong program is never installed.
+
+`shellcheck scripts/install.sh` lints the installer.
+
+## Releasing
+
+1. Set the new `version` in `Cargo.toml`, run `cargo check` so
+   `Cargo.lock` follows, and merge that to `main`.
+2. Tag the merged commit and push the tag:
+   `git tag v0.2.0 && git push origin v0.2.0`.
+
+The [release workflow](.github/workflows/release.yml) checks that the tag
+matches `Cargo.toml` and runs the full checks. It builds static Linux (musl)
+and macOS binaries, then publishes the release with
+`fabriscope-<target>.tar.gz` archives, `SHA256SUMS` and build attestations.
+Installed copies pick it up within a day. A pull request that changes the
+release path runs the same checks and builds without publishing.
 
 ## Licence
 

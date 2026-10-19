@@ -1,7 +1,9 @@
 //! Runs the real binary against fake `bd` and `scrolls` programs and reads
 //! its pages over HTTP. The fake `bd serve` points Fabriscope at a small
 //! fake Beads API that this test runs, backed by files the test rewrites.
+//! The update tests run a copy of the binary against a fake GitHub release.
 
+use sha2::Digest;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
@@ -188,13 +190,24 @@ fn fake_api(beads: PathBuf) -> (String, Arc<Mutex<Vec<String>>>) {
 }
 
 fn start(args: &[&str]) -> Server {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fabriscope"))
-        .args(args)
-        .args(["--bind", "127.0.0.1:0"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    // Never let a test update the build output in target/.
+    start_program(
+        Path::new(env!("CARGO_BIN_EXE_fabriscope")),
+        args,
+        &[("FABRISCOPE_NO_UPDATE", "1")],
+    )
+}
+
+fn start_program(program: &Path, args: &[&str], env: &[(&str, &str)]) -> Server {
+    let mut child = retry_busy(program, || {
+        Command::new(program)
+            .args(args)
+            .args(["--bind", "127.0.0.1:0"])
+            .envs(env.iter().copied())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    });
     let stderr = Arc::new(Mutex::new(String::new()));
     let sink = stderr.clone();
     let pipe = child.stderr.take().unwrap();
@@ -443,4 +456,264 @@ fn refuses_to_start_on_bad_arguments_or_an_unreadable_store() {
         !output.status.success(),
         "an unreachable bd serve is an error at startup"
     );
+}
+
+/// A fake GitHub release: `latest` redirects to the tag, and the tag serves
+/// one archive and its `SHA256SUMS`.
+struct Release {
+    tag: &'static str,
+    archive: Vec<u8>,
+    sums: String,
+}
+
+const TARGET: &str = "test-target";
+
+fn archive_with(program: &str) -> Vec<u8> {
+    let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::fast(),
+    ));
+    for (path, body) in [("fabriscope", program), ("README.md", "readme")] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(body.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, body.as_bytes())
+            .unwrap();
+    }
+    builder.into_inner().unwrap().finish().unwrap()
+}
+
+fn release(tag: &'static str, reports: &str) -> Release {
+    let archive = archive_with(&format!(
+        "#!/bin/sh\necho 'fabriscope {reports} (test-target)'\n"
+    ));
+    let sum: String = sha2::Sha256::digest(&archive)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Release {
+        tag,
+        sums: format!("{sum}  fabriscope-{TARGET}.tar.gz\n0000  fabriscope-other.tar.gz\n"),
+        archive,
+    }
+}
+
+/// Serves the release and returns its base URL (`…/releases`).
+fn serve_release(release: Release) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/releases", listener.local_addr().unwrap());
+    let location = format!("{base}/tag/{}", release.tag);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut request = String::new();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            while reader.read_line(&mut request).unwrap_or(0) > 2 {}
+            let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+            let download = format!("/releases/download/{}/", release.tag);
+            let (status, extra, body): (u16, String, Vec<u8>) = if path == "/releases/latest" {
+                (302, format!("Location: {location}\r\n"), vec![])
+            } else if path == format!("{download}fabriscope-{TARGET}.tar.gz") {
+                (200, String::new(), release.archive.clone())
+            } else if path == format!("{download}SHA256SUMS") {
+                (200, String::new(), release.sums.clone().into_bytes())
+            } else {
+                (404, String::new(), b"not found".to_vec())
+            };
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status} X\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(&body);
+        }
+    });
+    base
+}
+
+/// A copy of the binary in its own folder, so an update replaces the copy.
+/// The folder goes when the test ends: a debug build is large.
+struct Installed(PathBuf);
+
+impl std::ops::Deref for Installed {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for Installed {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Installed {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.0.parent().unwrap());
+    }
+}
+
+fn installed_copy(name: &str) -> Installed {
+    let dir = scratch(&format!("{name}-bin"));
+    let program = dir.join("fabriscope");
+    std::fs::copy(env!("CARGO_BIN_EXE_fabriscope"), &program).unwrap();
+    Installed(program)
+}
+
+/// A copy written moments ago can be briefly "text file busy" if another
+/// test thread forked while it was open, so starting it is retried.
+fn retry_busy<T>(program: &Path, mut launch: impl FnMut() -> std::io::Result<T>) -> T {
+    for _ in 0..40 {
+        match launch() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(50))
+            }
+            result => return result.unwrap(),
+        }
+    }
+    panic!("{} stayed busy", program.display());
+}
+
+fn run(program: &Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+    retry_busy(program, || {
+        Command::new(program)
+            .args(args)
+            .env_remove("FABRISCOPE_NO_UPDATE")
+            .envs(env.iter().copied())
+            .output()
+    })
+}
+
+fn update_env(base: &str) -> [(&'static str, &str); 2] {
+    [
+        ("FABRISCOPE_TARGET", TARGET),
+        ("FABRISCOPE_RELEASES_URL", base),
+    ]
+}
+
+fn leftovers(program: &Path) -> Vec<String> {
+    std::fs::read_dir(program.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n != "fabriscope")
+        .collect()
+}
+
+#[test]
+fn update_installs_a_newer_release_over_the_copy_that_runs() {
+    let base = serve_release(release("v9.9.9", "9.9.9"));
+    let program = installed_copy("update-newer");
+    let output = run(&program, &["update"], &update_env(&base));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("updated to 9.9.9"), "{stdout}");
+    let after = run(&program, &["--version"], &[]);
+    assert_eq!(
+        String::from_utf8_lossy(&after.stdout).trim(),
+        "fabriscope 9.9.9 (test-target)"
+    );
+    assert!(leftovers(&program).is_empty(), "{:?}", leftovers(&program));
+}
+
+#[test]
+fn update_refuses_a_bad_checksum_or_a_program_that_lies_about_its_version() {
+    let mut bad_sum = release("v9.9.9", "9.9.9");
+    bad_sum.sums = bad_sum
+        .sums
+        .replacen(|c: char| c.is_ascii_hexdigit(), "x", 1);
+    let wrong_version = release("v9.9.9", "1.0.0");
+    for (case, release, says) in [
+        ("bad-sum", bad_sum, "does not match its SHA256SUMS entry"),
+        ("wrong-version", wrong_version, "not version 9.9.9"),
+    ] {
+        let base = serve_release(release);
+        let program = installed_copy(&format!("update-{case}"));
+        let before = std::fs::read(&program).unwrap();
+        let output = run(&program, &["update"], &update_env(&base));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{case}");
+        assert!(stderr.contains(says), "{case}: {stderr}");
+        assert!(
+            std::fs::read(&program).unwrap() == before,
+            "{case}: replaced"
+        );
+        assert!(leftovers(&program).is_empty(), "{case}");
+    }
+}
+
+#[test]
+fn update_leaves_the_latest_release_alone_and_source_builds_refuse() {
+    let base = serve_release(release("v0.0.1", "0.0.1"));
+    let program = installed_copy("update-current");
+    let before = std::fs::read(&program).unwrap();
+    let output = run(&program, &["update"], &update_env(&base));
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("is the latest release"));
+    assert!(std::fs::read(&program).unwrap() == before);
+    let version = run(&program, &["--version"], &[("FABRISCOPE_TARGET", TARGET)]);
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout).trim(),
+        format!("fabriscope {} (test-target)", env!("CARGO_PKG_VERSION"))
+    );
+    if option_env!("FABRISCOPE_TARGET").is_none() {
+        let output = run(
+            &program,
+            &["update"],
+            &[("FABRISCOPE_RELEASES_URL", base.as_str())],
+        );
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("built from source"));
+        assert!(std::fs::read(&program).unwrap() == before);
+    }
+}
+
+#[test]
+fn a_running_server_updates_in_the_background_unless_told_not_to() {
+    let s = store("background");
+    let scrolls_bin = s.tools.join("scrolls");
+    let args = [
+        "--scrolls",
+        s.scrolls.to_str().unwrap(),
+        "--scrolls-bin",
+        scrolls_bin.to_str().unwrap(),
+    ];
+    let base = serve_release(release("v9.9.9", "9.9.9"));
+
+    let program = installed_copy("background");
+    let server = start_program(&program, &args, &update_env(&base));
+    wait_for(&server, "no background update", |_, h| {
+        h.contains(r#""update":{"installed":"9.9.9"}"#)
+    });
+    assert!(
+        server
+            .stderr
+            .lock()
+            .unwrap()
+            .contains("updated to v9.9.9; restart to use it")
+    );
+    let (_, health) = get(&server, "/healthz");
+    assert!(
+        health.contains(&format!(r#""version":"{}""#, env!("CARGO_PKG_VERSION"))),
+        "the running server keeps its own version: {health}"
+    );
+    drop(server);
+    assert!(String::from_utf8_lossy(&run(&program, &["--version"], &[]).stdout).contains("9.9.9"));
+
+    let program = installed_copy("background-off");
+    let before = std::fs::read(&program).unwrap();
+    let mut env = update_env(&base).to_vec();
+    env.push(("FABRISCOPE_NO_UPDATE", "1"));
+    let server = start_program(&program, &args, &env);
+    std::thread::sleep(Duration::from_secs(2));
+    let (_, health) = get(&server, "/healthz");
+    assert!(health.contains(r#""update":null"#), "{health}");
+    drop(server);
+    assert!(std::fs::read(&program).unwrap() == before);
 }

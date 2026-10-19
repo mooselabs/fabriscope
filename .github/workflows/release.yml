@@ -1,0 +1,136 @@
+name: release
+
+# Pushing a tag vX.Y.Z (matching Cargo.toml) builds Fabriscope for Linux and
+# macOS and publishes a GitHub release. A pull request that touches the
+# release path runs the same checks and builds without publishing.
+# scripts/install.sh and the self-updater read these exact asset names, so
+# keep them stable.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - Cargo.toml
+      - Cargo.lock
+      - scripts/install.sh
+      - src/update.rs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+      - name: Tag matches Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "fabriscope") | .version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked
+      - name: Lint the installer
+        run: shellcheck scripts/install.sh
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            smoke: true
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            smoke: true
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            smoke: true
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            smoke: false
+    runs-on: ${{ matrix.runner }}
+    env:
+      # Names the asset the self-updater fetches, and turns it on.
+      FABRISCOPE_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }} && rustup default stable
+      - name: Install musl
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          # ring's C code; Rust links musl with its own bundled C runtime.
+          echo "CC_$(echo "${{ matrix.target }}" | tr '-' '_')=musl-gcc" >> "$GITHUB_ENV"
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Smoke test
+        if: matrix.smoke
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "fabriscope") | .version')
+          out=$(target/${{ matrix.target }}/release/fabriscope --version)
+          echo "$out"
+          [ "$out" = "fabriscope $version (${{ matrix.target }})" ]
+      - name: Static on Linux
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          file target/${{ matrix.target }}/release/fabriscope
+          file target/${{ matrix.target }}/release/fabriscope | grep -Eq 'statically linked|static-pie linked'
+      - name: Package
+        run: |
+          stage=$(mktemp -d)
+          cp target/${{ matrix.target }}/release/fabriscope README.md LICENSE-MIT LICENSE-APACHE "$stage/"
+          tar -czf "fabriscope-${{ matrix.target }}.tar.gz" -C "$stage" fabriscope README.md LICENSE-MIT LICENSE-APACHE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fabriscope-${{ matrix.target }}
+          path: fabriscope-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fabriscope-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum fabriscope-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          [ "$(wc -l < SHA256SUMS)" -eq 4 ]
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "Fabriscope $GITHUB_REF_NAME" dist/fabriscope-*.tar.gz dist/SHA256SUMS
