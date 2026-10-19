@@ -4,6 +4,7 @@ mod beads;
 mod model;
 mod render;
 mod scrolls;
+mod scrolls_http;
 mod serve;
 mod tools;
 mod update;
@@ -31,7 +32,7 @@ use tokio::sync::{RwLock, watch};
 use tokio_stream::{StreamExt, wrappers::WatchStream};
 use tools::Tool;
 
-const USAGE: &str = "Usage: fabriscope [--beads DIR | --beads-url URL] [--scrolls STORE] [options]
+const USAGE: &str = "Usage: fabriscope [--beads DIR | --beads-url URL] [--scrolls STORE | --scrolls-url URL] [options]
        fabriscope update
 
 View a Beads store, a Scrolls store, or both, in a web browser. Release
@@ -43,7 +44,8 @@ builds update themselves in the background; `fabriscope update` updates now.
   --beads-token-file F Bearer token file for that `bd serve`
   --parent-key PATH    Metadata path naming a bead's parent (by id or external
                        reference), for stores without parent-child links
-  --scrolls STORE      A Scrolls store directory (usually …/.scrolls)
+  --scrolls STORE      Start private scrolls serve for this store
+  --scrolls-url URL    Attach to an existing loopback scrolls serve
   --bind ADDR          Address to listen on (default 127.0.0.1:8787)
   --title TEXT         A name shown in the header
   --bd PATH            The bd program (default: bd on PATH)
@@ -86,6 +88,7 @@ struct Config {
     beads_token_file: Option<PathBuf>,
     parent_key: Option<String>,
     scrolls: Option<PathBuf>,
+    scrolls_url: Option<String>,
     bind: Option<SocketAddr>,
     title: Option<String>,
     bd: Option<PathBuf>,
@@ -118,6 +121,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
             "--beads-token-file" => {
                 config.beads_token_file = Some(value("--beads-token-file")?.into())
             }
+            "--scrolls-url" => config.scrolls_url = Some(value("--scrolls-url")?),
             "--scrolls" => config.scrolls = Some(value("--scrolls")?.into()),
             "--bind" => {
                 config.bind = Some(
@@ -139,13 +143,17 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
     if config.beads.is_some() && config.beads_url.is_some() {
         return Err("give --beads DIR or --beads-url URL, not both".into());
     }
+    if config.scrolls.is_some() && config.scrolls_url.is_some() {
+        return Err("give --scrolls STORE or --scrolls-url URL, not both".into());
+    }
     if !config.help
         && !config.version
         && config.beads.is_none()
         && config.beads_url.is_none()
         && config.scrolls.is_none()
+        && config.scrolls_url.is_none()
     {
-        return Err("give --beads DIR (or --beads-url URL), --scrolls STORE, or both".into());
+        return Err("give --beads DIR (or --beads-url URL), --scrolls STORE (or --scrolls-url URL), or both".into());
     }
     Ok(config)
 }
@@ -260,50 +268,40 @@ async fn watch_beads(
     }
 }
 
-/// Re-reads Scrolls when the store's files change, and every ten minutes.
-async fn watch_scrolls(app: App, tool: Tool, store: PathBuf) {
-    let fingerprint = |store: PathBuf| async move {
-        tokio::task::spawn_blocking(move || scrolls::fingerprint(&store))
-            .await
-            .map_err(|e| e.to_string())?
-    };
-    let mut last = fingerprint(store.clone()).await.ok();
-    let mut refreshed = Instant::now();
+/// Single-flight conditional refresh, with the delay measured after completion.
+async fn watch_scrolls(app: App, mut api: scrolls_http::Api) {
     loop {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let current = fingerprint(store.clone()).await;
-        // A failing fingerprint falls back to the timer rather than re-reading
-        // every two seconds.
-        let changed = match (&current, &last) {
-            (Ok(now), Some(before)) => now != before,
-            (Ok(_), None) => true,
-            (Err(_), _) => false,
-        };
-        if !changed && refreshed.elapsed() < Duration::from_secs(600) {
-            continue;
-        }
-        let result = scrolls::load(&tool).await;
-        refreshed = Instant::now();
-        // Take the fingerprint after the read, so the read's own files settle first.
-        last = fingerprint(store.clone()).await.ok();
-        app.update(|view| {
-            if let Some(feed) = view.scrolls.as_mut() {
-                match result {
-                    Ok(snapshot) => {
-                        *feed = Feed {
-                            data: Arc::new(snapshot),
-                            error: None,
-                        }
-                    }
-                    Err(error) => {
-                        feed.error = Some(format!(
-                            "Scrolls read failed; showing the last good read. {error}"
-                        ))
-                    }
-                }
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        refresh_scrolls(&app, &mut api).await;
+    }
+}
+
+async fn refresh_scrolls(app: &App, api: &mut scrolls_http::Api) {
+    let result = api.refresh().await;
+    let mut view = app.view.write().await;
+    let Some(feed) = view.scrolls.as_mut() else {
+        return;
+    };
+    let changed = match result {
+        Ok(snapshot) => {
+            let recovered = feed.error.take().is_some();
+            let changed = snapshot.is_some() || recovered;
+            if let Some(snapshot) = snapshot {
+                feed.data = Arc::new(snapshot);
             }
-        })
-        .await;
+            view.scrolls_checked_at = Some(chrono::Utc::now().to_rfc3339());
+            changed
+        }
+        Err(error) => {
+            let error = format!("Scrolls read failed; showing the last good read. {error}");
+            let changed = feed.error.as_ref() != Some(&error);
+            feed.error = Some(error);
+            changed
+        }
+    };
+    if changed {
+        view.revision += 1;
+        app.updates.send_replace(view.revision);
     }
 }
 
@@ -372,6 +370,11 @@ async fn health(State(app): State<App>) -> Response {
         serde_json::json!({
             "read_at": f.data.generated_at,
             "revision": f.data.revision,
+            "source": f.data.source,
+            "store_id": f.data.store_id,
+            "branch": f.data.branch,
+            "schema_revision": f.data.schema_revision,
+            "last_successful_check": view.scrolls_checked_at,
             "scrolls": f.data.scrolls.len(),
             "edges": f.data.edges.len(),
             "error": f.error,
@@ -481,9 +484,13 @@ async fn run() -> Result<(), String> {
         .as_deref()
         .map(|s| existing_dir(s, "--scrolls"))
         .transpose()?;
-    let scrolls_tool = scrolls_store
-        .as_deref()
-        .map(|store| scrolls_tool(&config, store));
+    let mut scrolls_api = if let Some(url) = &config.scrolls_url {
+        Some(scrolls_http::Api::connect(url).await?)
+    } else if let Some(store) = &scrolls_store {
+        Some(scrolls_http::start(&scrolls_tool(&config, store)).await?)
+    } else {
+        None
+    };
     // An unreadable store at startup is an error, not an empty page.
     eprintln!("fabriscope: reading the stores…");
     let first_signal = match &beads_reader {
@@ -500,13 +507,21 @@ async fn run() -> Result<(), String> {
             }
         },
         async {
-            match &scrolls_tool {
-                Some(tool) => scrolls::load(tool).await.map(Some),
+            match &mut scrolls_api {
+                Some(api) => api.refresh().await,
                 None => Ok(None),
             }
         },
     );
-    let (beads, scrolls) = (beads?, scrolls?);
+    let (beads, scrolls) = match (beads, scrolls) {
+        (Ok(beads), Ok(scrolls)) => (beads, scrolls),
+        (Err(error), _) | (_, Err(error)) => {
+            if let Some(api) = &scrolls_api {
+                api.stop().await;
+            }
+            return Err(error);
+        }
+    };
     let title = config.title.clone().unwrap_or_default();
     let summary = format!(
         "{}{}",
@@ -519,6 +534,7 @@ async fn run() -> Result<(), String> {
             .map(|s| format!(" · {} scrolls", s.scrolls.len()))
             .unwrap_or_default()
     );
+    let scrolls_checked_at = scrolls.as_ref().map(|s| s.generated_at.clone());
     let app = App::new(View {
         title,
         beads: beads.map(|data| Feed {
@@ -529,14 +545,21 @@ async fn run() -> Result<(), String> {
             data: Arc::new(data),
             error: None,
         }),
+        scrolls_checked_at,
         revision: 1,
     });
     let bind = config
         .bind
         .unwrap_or_else(|| "127.0.0.1:8787".parse().unwrap());
-    let listener = tokio::net::TcpListener::bind(bind)
-        .await
-        .map_err(|e| format!("cannot listen on {bind}: {e}"))?;
+    let listener = match tokio::net::TcpListener::bind(bind).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            if let Some(api) = &scrolls_api {
+                api.stop().await;
+            }
+            return Err(format!("cannot listen on {bind}: {error}"));
+        }
+    };
     let address = listener.local_addr().map_err(|e| e.to_string())?;
     println!("Fabriscope: http://{address}{summary}");
     if let Some(reader) = beads_reader {
@@ -547,18 +570,41 @@ async fn run() -> Result<(), String> {
             first_signal,
         ));
     }
-    if let (Some(tool), Some(store)) = (scrolls_tool, scrolls_store) {
-        tokio::spawn(watch_scrolls(app.clone(), tool, store));
-    }
+    let scrolls_watch = scrolls_api
+        .as_ref()
+        .map(|api| tokio::spawn(watch_scrolls(app.clone(), api.clone())));
     if update::automatic(config.no_update) {
         tokio::spawn(update::watch(app.installed.clone()));
     }
-    axum::serve(listener, router(app))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
-        .map_err(|e| e.to_string())
+    // Dropping the HTTP server also closes long-lived SSE connections, so
+    // shutdown cannot leave an owned child alive waiting for a browser.
+    let result = tokio::select! {
+        result = axum::serve(listener, router(app)) => result.map_err(|e| e.to_string()),
+        _ = shutdown_signal() => Ok(()),
+    };
+    if let Some(task) = scrolls_watch {
+        task.abort();
+        let _ = task.await;
+    }
+    if let Some(api) = scrolls_api {
+        api.stop().await;
+    }
+    result
+}
+
+/// Handle the same termination signals as the owned Scrolls server.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
+        let mut hup = signal(SignalKind::hangup()).expect("SIGHUP handler");
+        tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = term.recv() => {}, _ = hup.recv() => {} }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 /// `fabriscope update`: install a newer release, if there is one, and exit.
@@ -606,6 +652,8 @@ mod tests {
         assert!(args(&["--beads"]).is_err());
         assert!(args(&["--scrolls", "/tmp", "--bind", "nowhere"]).is_err());
         assert!(args(&["--frobnicate"]).is_err());
+        assert!(args(&["--scrolls-url", "http://127.0.0.1:9"]).is_ok());
+        assert!(args(&["--scrolls", "/tmp", "--scrolls-url", "http://127.0.0.1:9"]).is_err());
     }
 
     #[test]

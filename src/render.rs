@@ -1142,6 +1142,7 @@ mod tests {
                 error: None,
             }),
             revision: 3,
+            scrolls_checked_at: None,
         }
     }
 

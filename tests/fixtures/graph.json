@@ -1,11 +1,48 @@
 {
   "records": {
-    "sc-d1": {"id":"sc-d1","kind":"decision","status":"accepted","title":"Use Dolt for history","body":"Versioned storage lets us audit every change. Tracked in [the README bead](beads://0b9e5c1e/demo-1).","owner":"alice","created":"2026-10-02","path":"decisions/use-dolt.md","aliases":["ADR-1"],"fields":{"number":"1"},"revision":2},
-    "sc-e1": {"id":"sc-e1","kind":"evidence","status":"captured","title":"Rollback readback","body":"The interrupted transaction left no rows.","owner":"bob","created":"2026-10-03","path":"evidence/rollback.md","revision":1}
+    "sc-d1": {
+      "id": "sc-d1",
+      "kind": "decision",
+      "status": "accepted",
+      "title": "Use Dolt for history",
+      "body": "Versioned storage lets us audit every change. Tracked in [the README bead](beads://0b9e5c1e/demo-1).",
+      "owner": "alice",
+      "created": "2026-10-02",
+      "path": "decisions/use-dolt.md",
+      "aliases": [
+        "ADR-1"
+      ],
+      "fields": {
+        "number": "1"
+      },
+      "revision": 2
+    },
+    "sc-e1": {
+      "id": "sc-e1",
+      "kind": "evidence",
+      "status": "captured",
+      "title": "Rollback readback",
+      "body": "The interrupted transaction left no rows.",
+      "owner": "bob",
+      "created": "2026-10-03",
+      "path": "evidence/rollback.md",
+      "revision": 1,
+      "fields": {},
+      "aliases": []
+    }
   },
   "edges": {
-    "e1": {"from":"sc-e1","rel":"supports","to":"sc-d1","why":"measured"},
-    "e2": {"from":"sc-d1","rel":"related_work","to":"beads://0b9e5c1e/demo-1"}
+    "e1": {
+      "from": "sc-e1",
+      "rel": "supports",
+      "to": "sc-d1",
+      "why": "measured"
+    },
+    "e2": {
+      "from": "sc-d1",
+      "rel": "related_work",
+      "to": "beads://0b9e5c1e/demo-1"
+    }
   },
   "schema": {},
   "schema_revision": "fixture"

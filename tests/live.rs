@@ -30,18 +30,7 @@ case "$1" in
 esac
 "#;
 
-const FAKE_SCROLLS: &str = r#"#!/bin/sh
-# Writes graph.json where `render --out DIR` asks for it.
-graph="$(dirname "$0")/graph.json"
-while [ $# -gt 0 ]; do
-  if [ "$1" = "--out" ]; then out="$2"; fi
-  shift
-done
-[ -n "$out" ] || { echo "no --out" >&2; exit 2; }
-mkdir -p "$out/scrolls"
-cp "$graph" "$out/scrolls/graph.json"
-printf 'Scrolls test\nDolt revision: fixture-rev\n' > "$out/RENDERED"
-"#;
+const FAKE_SCROLLS: &str = include_str!("fixtures/scrolls.py");
 
 struct Server {
     child: Child,
@@ -254,7 +243,7 @@ fn get(server: &Server, path: &str) -> (u16, String) {
 }
 
 fn wait_for(server: &Server, what: &str, check: impl Fn(u16, &str) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(45);
     loop {
         let (status, health) = get(server, "/healthz");
         if check(status, &health) {
@@ -444,10 +433,9 @@ fn refuses_to_start_on_bad_arguments_or_an_unreadable_store() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("give --beads DIR (or --beads-url URL), --scrolls STORE, or both")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains(
+        "give --beads DIR (or --beads-url URL), --scrolls STORE (or --scrolls-url URL), or both"
+    ));
     let output = Command::new(env!("CARGO_BIN_EXE_fabriscope"))
         .args(["--beads-url", "http://127.0.0.1:1", "--bind", "127.0.0.1:0"])
         .output()
@@ -716,4 +704,166 @@ fn a_running_server_updates_in_the_background_unless_told_not_to() {
     assert!(health.contains(r#""update":null"#), "{health}");
     drop(server);
     assert!(std::fs::read(&program).unwrap() == before);
+}
+
+#[test]
+fn scrolls_managed_refresh_keeps_last_good_data_and_reaps_child() {
+    let s = store("scrolls-refresh");
+    let mut server = start(&[
+        "--scrolls",
+        s.scrolls.to_str().unwrap(),
+        "--scrolls-bin",
+        s.tools.join("scrolls").to_str().unwrap(),
+        "--scrolls-dolt",
+        "/test/dolt",
+    ]);
+    let initial: serde_json::Value = serde_json::from_str(&get(&server, "/healthz").1).unwrap();
+    assert_eq!(
+        initial["scrolls"]["store_id"],
+        "00000000-0000-4000-8000-000000000001"
+    );
+    assert_eq!(initial["scrolls"]["branch"], "main");
+    assert_eq!(initial["scrolls"]["revision"], "fixture-rev");
+    assert!(
+        initial["scrolls"]["source"]
+            .as_str()
+            .unwrap()
+            .starts_with("scrolls serve http://127.0.0.1:")
+    );
+    let argv: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(s.tools.join("argv.json")).unwrap()).unwrap();
+    assert_eq!(
+        &argv[argv.len() - 4..],
+        ["--json", "serve", "--bind", "127.0.0.1:0"]
+    );
+    assert!(argv.windows(2).any(|a| a == ["--dolt", "/test/dolt"]));
+    assert!(!argv.iter().any(|a| a == "render"));
+    wait_for(&server, "unchanged graph was not checked", |_, body| {
+        let h: serde_json::Value = serde_json::from_str(body).unwrap();
+        h["scrolls"]["last_successful_check"] != initial["scrolls"]["last_successful_check"]
+    });
+    let unchanged: serde_json::Value = serde_json::from_str(&get(&server, "/healthz").1).unwrap();
+    assert_eq!(
+        unchanged["revision"], initial["revision"],
+        "304 must not reload pages"
+    );
+    let mut graph: serde_json::Value = serde_json::from_str(&fixture("graph.json")).unwrap();
+    graph["records"]["sc-d1"]["title"] = serde_json::json!("Fresh graph title");
+    std::fs::write(s.tools.join("graph.json"), graph.to_string()).unwrap();
+    wait_for(&server, "changed graph was not refreshed", |_, body| {
+        serde_json::from_str::<serde_json::Value>(body).unwrap()["revision"] != initial["revision"]
+    });
+    assert!(
+        get(&server, "/scroll/sc-d1")
+            .1
+            .contains("Fresh graph title")
+    );
+    std::fs::write(s.tools.join("mode"), "invalid").unwrap();
+    wait_for(&server, "malformed response was accepted", |status, _| {
+        status == 503
+    });
+    let warning = get(&server, "/scroll/sc-d1").1;
+    assert!(warning.contains("Fresh graph title"));
+    assert!(warning.contains("Scrolls read failed"));
+    std::fs::write(s.tools.join("mode"), "").unwrap();
+    wait_for(&server, "recovery did not clear warning", |status, _| {
+        status == 200
+    });
+    assert!(!get(&server, "/").1.contains("Scrolls read failed"));
+    let requests = std::fs::read_to_string(s.tools.join("requests.jsonl")).unwrap();
+    assert!(
+        requests
+            .lines()
+            .skip(2)
+            .any(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["etag"].is_string())
+    );
+    let pid = std::fs::read_to_string(s.tools.join("pid")).unwrap();
+    // Existing tests kill Fabriscope outright; exercise orderly termination too.
+    let status = Command::new("kill")
+        .args(["-TERM", &server.child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while server.child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    #[cfg(target_os = "linux")]
+    assert!(
+        !Path::new(&format!("/proc/{pid}")).exists(),
+        "owned server survived shutdown"
+    );
+}
+
+#[test]
+fn scrolls_attachment_is_not_owned_and_incompatible_servers_fail_clearly() {
+    let s = store("scrolls-attached");
+    let mut child = Command::new(s.tools.join("scrolls"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    std::thread::spawn(move || {
+        let mut sink = std::io::sink();
+        let _ = std::io::copy(&mut stdout, &mut sink);
+    });
+    let event: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let url = format!("http://{}", event["address"].as_str().unwrap());
+    let server = start(&["--scrolls-url", &url]);
+    assert!(
+        get(&server, "/scroll/sc-d1")
+            .1
+            .contains("Use Dolt for history")
+    );
+    drop(server);
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "attached server was terminated"
+    );
+    std::fs::write(s.tools.join("mode"), "legacy").unwrap();
+    let out = run(
+        Path::new(env!("CARGO_BIN_EXE_fabriscope")),
+        &["--scrolls-url", &url],
+        &[("FABRISCOPE_NO_UPDATE", "1")],
+    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Upgrade Scrolls"));
+    assert!(child.try_wait().unwrap().is_none());
+    child.kill().unwrap();
+    child.wait().unwrap();
+    for mode in ["legacy", "bad-start", "exit", "invalid"] {
+        std::fs::write(s.tools.join("mode"), mode).unwrap();
+        let out = run(
+            Path::new(env!("CARGO_BIN_EXE_fabriscope")),
+            &[
+                "--scrolls",
+                s.scrolls.to_str().unwrap(),
+                "--scrolls-bin",
+                s.tools.join("scrolls").to_str().unwrap(),
+            ],
+            &[("FABRISCOPE_NO_UPDATE", "1")],
+        );
+        assert!(!out.status.success(), "{mode}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(if mode == "invalid" {
+                "Invalid Scrolls graph"
+            } else {
+                "Upgrade Scrolls"
+            }),
+            "{mode}: {:?}",
+            out
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let pid = std::fs::read_to_string(s.tools.join("pid")).unwrap();
+            assert!(
+                !Path::new(&format!("/proc/{pid}")).exists(),
+                "failed startup leaked {pid}"
+            );
+        }
+    }
 }

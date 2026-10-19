@@ -16,7 +16,8 @@ pub struct View {
     pub title: String,
     pub beads: Option<Feed<beads::Snapshot>>,
     pub scrolls: Option<Feed<scrolls::Snapshot>>,
-    /// Bumped on every refresh; open pages reload when it changes.
+    pub scrolls_checked_at: Option<String>,
+    /// Bumped on changed content or health; open pages reload when it changes.
     pub revision: u64,
 }
 

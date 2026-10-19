@@ -125,6 +125,11 @@ or external reference, opens that bead.
 
 ## How it reads
 
+The Scrolls HTTP reader was added after Fabriscope v0.1.0. That tagged binary
+still uses the prior render reader; build from source until a later tagged
+release includes this integration. Scrolls must advertise the `graph`
+capability; a version number alone does not establish support.
+
 Fabriscope only runs the stores' own read commands. It never writes,
 claims, or edits anything.
 
@@ -147,20 +152,44 @@ claims, or edits anything.
   - `bd serve` always offers write operations (claim, close, delete), and
     has no authentication on loopback unless you give it a token file.
     Fabriscope only ever sends reads.
-- **Scrolls:** `scrolls render` into a private temporary directory, reading
-  its `scrolls/graph.json` (every record and edge) and removing the directory
-  afterwards. The store's files are checked every two seconds; a change
-  triggers a fresh read, and a read also happens every ten minutes.
+- **Scrolls:** through `GET /v0/graph` on a loopback `scrolls serve`. The
+  complete snapshot includes document bodies, fields, paths, aliases and all
+  relationships, including Beads backlinks. Normal viewing creates no render
+  directory and does not scan the store filesystem.
+  - `--scrolls STORE` starts `scrolls --store STORE --json serve --bind
+    127.0.0.1:0`, retaining `--scrolls-bin` and `--scrolls-dolt`. Fabriscope
+    drains its output and terminates the private server on startup failure or
+    shutdown (on Linux, also when Fabriscope is killed).
+  - `--scrolls-url http://127.0.0.1:PORT` attaches to an existing server and
+    leaves it running on exit. It is mutually exclusive with `--scrolls`.
+    URLs must use HTTP and loopback, without credentials, paths or queries.
+    `localhost` resolves locally to IPv4 loopback; use `[::1]` for IPv6.
+    Configure shared connections and proposal selection on that server:
 
-A failed read keeps the last good one on screen with a warning, and
-`/healthz` returns 503 until a read succeeds. An unreadable store at startup
-stops the server with the tool's own error message.
+    ```sh
+    scrolls --connection /absolute/connection.json --proposal proposal/NAME serve --bind 127.0.0.1:8080 --json
+    fabriscope --scrolls-url http://127.0.0.1:8080
+    ```
 
-Reading takes as long as the tools take. On a store of 4,256 beads behind a
-remote Dolt server, `bd serve` answered the full list in about 4 seconds and
-the ready list in 2 (`bd export` took about 5.5); rendering 8,000 scrolls took about
-16 seconds and writes that many Markdown files to the temporary directory.
-Pages are served from memory and do not wait for reads.
+  - Discovery must advertise API `v0`, envelope version 2, read-only operation
+    and `graph`. Older Scrolls builds fail with an upgrade instruction; there
+    is no render fallback. Build/install a Scrolls revision that includes
+    `/v0/graph`, then restart the server. No storage migration is needed.
+  - Every 30 seconds after the previous request completes, Fabriscope sends
+    `If-None-Match` with its last validated ETag. Only one refresh is in flight.
+    An unchanged response updates the successful-check time without reloading
+    pages. Conditional requests still read the backend.
+  - Startup/discovery of a private server is bounded to 60 seconds. HTTP
+    requests are bounded to 120 seconds and graph responses to 256 MiB.
+    Malformed or incomplete snapshots never replace the current view. A
+    changed store identity or branch requires restarting Fabriscope to select it.
+
+A failed refresh keeps the last good documents and relationships on screen with
+an error warning. `/healthz` returns 503 until recovery and reports the source
+URL, store ID, branch, revision, schema revision and `last_successful_check`.
+An unreadable store at startup stops Fabriscope. Attached servers remain owned
+by their caller. Pages are served from memory and do not wait for backend reads.
+
 
 ### History and forecasts
 
@@ -235,3 +264,18 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
+
+### Qualify the real Scrolls integration
+
+The CI integration tests use disposable HTTP/process fixtures. For a composed
+readback with both real binaries and local/shared Dolt, run:
+
+```sh
+python3 scripts/verify-scrolls.py --fabriscope target/debug/fabriscope --scrolls /absolute/scrolls --dolt /absolute/dolt --out /fresh/qualification-directory
+```
+
+This creates and cleans up its own servers, checks all graph records and edges
+against a render oracle, exercises Beads backlinks and a live refresh, and
+reports startup, conditional read and refresh timing plus Linux RSS for 8,000
+documents. The render oracle is test-only; the viewer's temporary directory
+must remain empty. No existing store or installed service is changed.

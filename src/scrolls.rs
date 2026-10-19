@@ -1,19 +1,11 @@
-//! Reads a Scrolls store through the `scrolls` command line.
-//!
-//! `scrolls render` writes a fresh export whose `scrolls/graph.json` holds
-//! every record and every edge. Fabriscope renders into a private temporary
-//! directory, reads that one file, and removes the directory again.
+//! Validated Scrolls graph snapshots and document/link indexes.
 
-use crate::tools::{Tool, run};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
 pub struct Scroll {
     pub id: String,
     pub kind: String,
@@ -31,7 +23,6 @@ pub struct Scroll {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
 pub struct Edge {
     pub from: String,
     pub rel: String,
@@ -42,14 +33,17 @@ pub struct Edge {
 #[derive(Deserialize)]
 struct Graph {
     records: HashMap<String, Scroll>,
-    #[serde(default)]
     edges: HashMap<String, Edge>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub generated_at: String,
-    /// The Dolt revision the render was taken at.
+    pub source: String,
+    pub store_id: String,
+    pub branch: String,
+    pub schema_revision: String,
+    /// The Dolt revision of this HTTP snapshot.
     pub revision: Option<String>,
     /// Scrolls in display order: newest first, then title.
     pub scrolls: Vec<Scroll>,
@@ -88,6 +82,10 @@ impl Snapshot {
             incoming.entry(edge.to.clone()).or_default().push(i);
         }
         Self {
+            source: String::new(),
+            store_id: String::new(),
+            branch: String::new(),
+            schema_revision: String::new(),
             generated_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
             revision,
             scrolls,
@@ -177,66 +175,39 @@ pub fn bead_reference(target: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+#[cfg(test)]
 pub fn parse_graph(json: &str, revision: Option<String>) -> Result<Snapshot, String> {
+    parse_graph_value(
+        serde_json::from_str(json).map_err(|e| format!("Scrolls graph: {e}"))?,
+        revision,
+    )
+}
+
+pub fn parse_graph_value(value: Value, revision: Option<String>) -> Result<Snapshot, String> {
     let graph: Graph =
-        serde_json::from_str(json).map_err(|e| format!("scrolls graph.json: {e}"))?;
+        serde_json::from_value(value).map_err(|_| "Invalid Scrolls graph structure".to_string())?;
+    for (key, record) in &graph.records {
+        if key.is_empty()
+            || key != &record.id
+            || record.kind.is_empty()
+            || record.revision == 0
+            || !record.fields.is_object()
+        {
+            return Err("Invalid Scrolls graph record identity, revision or fields".into());
+        }
+    }
+    if graph
+        .edges
+        .iter()
+        .any(|(key, e)| key.is_empty() || e.from.is_empty() || e.rel.is_empty() || e.to.is_empty())
+    {
+        return Err("Invalid Scrolls graph relationship".into());
+    }
     Ok(Snapshot::new(
         graph.records.into_values().collect(),
         graph.edges.into_values().collect(),
         revision,
     ))
-}
-
-fn revision_from(rendered: &str) -> Option<String> {
-    rendered
-        .lines()
-        .find_map(|line| line.strip_prefix("Dolt revision:"))
-        .map(|r| r.trim().to_string())
-}
-
-/// Removes the render directory however the read ends.
-struct Scratch(PathBuf);
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-pub async fn load(tool: &Tool) -> Result<Snapshot, String> {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    let scratch =
-        Scratch(std::env::temp_dir().join(format!("fabriscope-{}-{nonce}", std::process::id())));
-    let out = scratch.0.to_string_lossy().into_owned();
-    run(tool, &["--json", "render", "--out", &out], 600).await?;
-    let graph = tokio::fs::read_to_string(scratch.0.join("scrolls/graph.json"))
-        .await
-        .map_err(|e| format!("scrolls render wrote no scrolls/graph.json: {e}"))?;
-    let rendered = tokio::fs::read_to_string(scratch.0.join("RENDERED"))
-        .await
-        .unwrap_or_default();
-    let revision = revision_from(&rendered);
-    tokio::task::spawn_blocking(move || parse_graph(&graph, revision))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-/// A cheap change probe: sizes and modification times of the store's files.
-pub fn fingerprint(store: &Path) -> Result<u64, String> {
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
-    for entry in walkdir::WalkDir::new(store).sort_by_file_name() {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.file_type().is_file() {
-            let meta = entry.metadata().map_err(|e| e.to_string())?;
-            entry.path().hash(&mut hash);
-            meta.len().hash(&mut hash);
-            meta.modified().map_err(|e| e.to_string())?.hash(&mut hash);
-        }
-    }
-    Ok(hash.finish())
 }
 
 #[cfg(test)]
@@ -245,9 +216,9 @@ mod tests {
 
     const GRAPH: &str = r#"{
       "records": {
-        "sc-a": {"id":"sc-a","kind":"decision","status":"accepted","title":"Use Dolt","body":"See [b](../notes/b.md).","created":"2026-10-02","path":"decisions/a.md","aliases":["docs/decisions/a.md","ADR-1"],"original":{"ignored":true}},
-        "sc-b": {"id":"sc-b","kind":"note","status":"recorded","title":"Notes","body":"","created":"2026-10-03","path":"notes/b.md"},
-        "sc-c": {"id":"sc-c","kind":"note","status":"recorded","title":"Native","body":"","created":null,"path":null}
+        "sc-a": {"id":"sc-a","kind":"decision","status":"accepted","title":"Use Dolt","body":"See [b](../notes/b.md).","fields":{},"revision":1,"created":"2026-10-02","path":"decisions/a.md","aliases":["docs/decisions/a.md","ADR-1"],"original":{"ignored":true}},
+        "sc-b": {"id":"sc-b","kind":"note","status":"recorded","title":"Notes","body":"","fields":{},"revision":1,"aliases":[],"created":"2026-10-03","path":"notes/b.md"},
+        "sc-c": {"id":"sc-c","kind":"note","status":"recorded","title":"Native","body":"","fields":{},"revision":1,"aliases":[],"created":null,"path":null}
       },
       "edges": {
         "1": {"from":"sc-b","rel":"supports","to":"sc-a","why":"measured"},
@@ -297,14 +268,10 @@ mod tests {
     }
 
     #[test]
-    fn bead_references_and_render_revision() {
+    fn bead_references() {
         assert_eq!(bead_reference("beads://store-uuid/fx-1"), Some("fx-1"));
         assert_eq!(bead_reference("work:fx-2"), Some("fx-2"));
         assert_eq!(bead_reference("sc-123"), None);
         assert_eq!(bead_reference("https://example.org/x"), None);
-        assert_eq!(
-            revision_from("Scrolls 0.3.0\nDolt revision: abc\n"),
-            Some("abc".into())
-        );
     }
 }
