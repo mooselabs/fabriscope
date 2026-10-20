@@ -127,12 +127,20 @@ scroll at that path (or the one scroll whose path ends with it); a
 `beads://STORE/ID` or `NAME:ID` reference, or a file named after a bead's id
 or external reference, opens that bead.
 
+## Appearance
+
+Use **Theme** in the header to choose **System**, **Light**, or **Dark**.
+System is the default and follows your device's appearance, including changes
+while a page is open. An explicit choice overrides the device setting.
+Fabriscope remembers the choice in this browser for the same server address,
+across page navigation and restarts, and keeps open tabs in sync. If browser
+storage is disabled, the choice still works for the current page. With
+JavaScript disabled, pages follow the device setting.
+
 ## How it reads
 
-The Scrolls HTTP reader was added after Fabriscope v0.1.0. That tagged binary
-still uses the prior render reader; build from source until a later tagged
-release includes this integration. Scrolls must advertise the `graph`
-capability; a version number alone does not establish support.
+The Scrolls HTTP reader is included from Fabriscope v0.2.0. Scrolls must
+advertise the `graph` capability; a version number alone does not establish support.
 
 Fabriscope only runs the stores' own read commands. It never writes,
 claims, or edits anything.
@@ -239,6 +247,17 @@ also runs copies of the binary against a fake GitHub release. These check
 checksum or a wrong program is never installed.
 
 `shellcheck scripts/install.sh` lints the installer.
+
+The theme browser checks run against the real binary with disposable Beads and
+Scrolls fixtures. They cover system preferences, explicit overrides, persistence,
+other tabs, live refresh, keyboard access, contrast, mobile widths and disabled
+storage/JavaScript. CI runs them; locally, after `cargo build --locked`:
+
+```sh
+python3 -m pip install playwright==1.64.0
+playwright install chromium
+python3 tests/theme.py --binary target/debug/fabriscope
+```
 
 ## Releasing
 

@@ -23,3 +23,11 @@ jobs:
         run: cargo test --locked
       - name: Lint the installer
         run: shellcheck scripts/install.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Theme browser checks
+        run: |
+          pip install playwright==1.64.0
+          playwright install --with-deps chromium
+          python3 tests/theme.py --binary target/debug/fabriscope

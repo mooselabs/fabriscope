@@ -452,6 +452,15 @@ fn router(app: App) -> Router {
                 )
             }),
         )
+        .route(
+            "/theme.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../static/theme.js"),
+                )
+            }),
+        )
         .fallback(|| async { (StatusCode::NOT_FOUND, "Not found") })
         .layer(middleware::from_fn(headers))
         .with_state(app)
@@ -718,6 +727,8 @@ mod tests {
             ("/scroll/no-such-id", 404),
             ("/healthz", 200),
             ("/app.css", 200),
+            ("/app.js", 200),
+            ("/theme.js", 200),
             ("/.git/config", 404),
             ("/../.secret-test", 404),
         ] {
