@@ -33,9 +33,11 @@ pub struct Bead {
     pub external_ref: String,
     pub dependencies: Vec<Dependency>,
     pub metadata: Value,
-    /// Computed: `ready` / `waiting` for open beads, otherwise the status.
+    /// Computed: whether `bd ready` listed this bead. Readiness is Beads'
+    /// answer about dependencies, shown beside the stored status, never
+    /// instead of it.
     #[serde(skip)]
-    pub state: String,
+    pub ready: bool,
     /// Computed: the parent named by `--parent-key`, when the store keeps
     /// membership in metadata rather than in parent-child dependencies.
     #[serde(skip)]
@@ -79,15 +81,6 @@ fn metadata_str<'a>(metadata: &'a Value, path: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
-/// A bead's state from its status and whether `bd ready` listed it.
-pub fn state(status: &str, ready: bool) -> String {
-    match status {
-        "open" if ready => "ready".into(),
-        "open" => "waiting".into(),
-        other => other.into(),
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub generated_at: String,
@@ -129,7 +122,7 @@ impl Snapshot {
     ) -> Self {
         let ready_set: HashSet<&str> = ready.iter().map(String::as_str).collect();
         for bead in &mut beads {
-            bead.state = state(&bead.status, ready_set.contains(bead.id.as_str()));
+            bead.ready = ready_set.contains(bead.id.as_str());
         }
         let index: HashMap<String, usize> = beads
             .iter()
@@ -462,11 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn ready_comes_from_bd_and_other_statuses_pass_through() {
-        assert_eq!(state("open", true), "ready");
-        assert_eq!(state("open", false), "waiting");
-        assert_eq!(state("in_progress", true), "in_progress");
-        assert_eq!(state("deferred", false), "deferred");
+    fn ready_comes_from_bd_and_the_status_is_kept_as_stored() {
         let snapshot = Snapshot::new(
             vec![
                 bead("a", "open", "2026-10-01T00:00:00Z", None),
@@ -476,8 +465,9 @@ mod tests {
             None,
             Utc::now(),
         );
-        assert_eq!(snapshot.get("a").unwrap().state, "waiting");
-        assert_eq!(snapshot.get("b").unwrap().state, "ready");
+        assert!(!snapshot.get("a").unwrap().ready);
+        assert!(snapshot.get("b").unwrap().ready);
+        assert_eq!(snapshot.get("b").unwrap().status, "open");
         assert_eq!(snapshot.ready, vec!["b".to_string()]);
     }
 

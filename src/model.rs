@@ -42,18 +42,27 @@ pub struct BeadFilter {
     #[serde(rename = "type")]
     pub issue_type: String,
     pub priority: String,
+    /// `yes` for beads `bd ready` lists, `no` for the rest, empty for any.
+    pub ready: String,
     pub page: usize,
 }
 
 impl BeadFilter {
+    /// `state` is a status exactly as stored, `all`, or empty for every bead
+    /// that is not closed.
     pub fn matches(&self, bead: &beads::Bead) -> bool {
         let state = match self.state.as_str() {
-            "" | "open" => !bead.is_closed(),
+            "" => !bead.is_closed(),
             "all" => true,
-            "waiting" => matches!(bead.state.as_str(), "waiting" | "blocked"),
-            state => bead.state == state,
+            status => bead.status == status,
+        };
+        let ready = match self.ready.as_str() {
+            "yes" => bead.ready,
+            "no" => !bead.ready,
+            _ => true,
         };
         state
+            && ready
             && (self.issue_type.is_empty() || bead.issue_type == self.issue_type)
             && (self.priority.is_empty() || bead.priority.to_string() == self.priority)
             && (self.q.is_empty()
@@ -100,12 +109,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bead_filter_defaults_to_open_work() {
+    fn bead_filter_defaults_to_beads_not_closed() {
         let open = beads::Bead {
             id: "fx-1".into(),
             title: "Fix login".into(),
             status: "open".into(),
-            state: "waiting".into(),
             issue_type: "bug".into(),
             priority: 1,
             ..Default::default()
@@ -113,7 +121,6 @@ mod tests {
         let closed = beads::Bead {
             id: "fx-2".into(),
             status: "closed".into(),
-            state: "closed".into(),
             ..Default::default()
         };
         let all = BeadFilter {
@@ -123,13 +130,26 @@ mod tests {
         assert!(BeadFilter::default().matches(&open));
         assert!(!BeadFilter::default().matches(&closed));
         assert!(all.matches(&closed));
-        assert!(
-            BeadFilter {
-                state: "waiting".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
+        // A status filter compares with the stored status, so `open` means
+        // status open, not "anything not closed".
+        let status = |state: &str| BeadFilter {
+            state: state.into(),
+            ..Default::default()
+        };
+        assert!(status("open").matches(&open));
+        assert!(!status("open").matches(&closed));
+        assert!(status("closed").matches(&closed));
+        assert!(!status("in_progress").matches(&open));
+        let ready = |ready: &str| BeadFilter {
+            ready: ready.into(),
+            ..Default::default()
+        };
+        assert!(ready("no").matches(&open));
+        assert!(!ready("yes").matches(&open));
+        assert!(ready("yes").matches(&beads::Bead {
+            ready: true,
+            ..open.clone()
+        }));
         assert!(
             BeadFilter {
                 q: "LOGIN".into(),

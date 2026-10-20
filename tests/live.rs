@@ -273,8 +273,33 @@ fn check_pages(server: &Server) {
         "a document link reaches the scroll"
     );
     assert!(bead.contains("Scrolls about this bead"));
+    assert!(bead.contains("Ready, as bd ready decides"));
     let (_, blocked) = get(server, "/bead/demo-2");
-    assert!(blocked.contains("badge waiting"));
+    assert!(
+        blocked.contains("<span class=\"badge open\">open</span>"),
+        "the badge is the stored status, not a computed one"
+    );
+    assert!(!blocked.contains("Ready, as bd ready decides"));
+    // Filters offer exactly the statuses and types the store holds.
+    let (_, list) = get(server, "/beads?state=all");
+    for option in [
+        "<option value=\"open\">open (3)</option>",
+        "<option value=\"closed\">closed (1)</option>",
+        "<option value=\"epic\">epic (1)</option>",
+        "<option value=\"task\">task (3)</option>",
+    ] {
+        assert!(list.contains(option), "{option}");
+    }
+    assert!(
+        !list.contains("value=\"hooked\""),
+        "no status the store lacks"
+    );
+    assert!(
+        get(server, "/beads?state=open&ready=no")
+            .1
+            .contains("2 matching beads"),
+        "open beads bd ready does not list"
+    );
     assert!(
         blocked.contains("href=\"/bead/demo%2D1\""),
         "its blocker is linked"
