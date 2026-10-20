@@ -222,7 +222,12 @@ tbody tr:hover {
   padding:3px 8px;
   white-space:nowrap;
 }
-.badge.ready,.badge.done {
+.badge.open {
+  color:#2c57a3;
+  background:transparent;
+  box-shadow:inset 0 0 0 1px #c5d5f5;
+}
+.badge.done {
   color:#12634f;
   background:#e7f5ee;
 }

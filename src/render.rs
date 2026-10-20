@@ -7,7 +7,7 @@ use crate::model::{BeadFilter, ScrollFilter, View};
 use crate::scrolls::{self, Scroll};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, html};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write;
 
 const PAGE_SIZE: usize = 100;
@@ -37,18 +37,74 @@ fn words(value: &str) -> String {
     value.replace('_', " ")
 }
 
-fn badge(state: &str) -> String {
-    let class = match state {
-        "ready" => "ready",
+/// A bead's status exactly as Beads stores it. The colour follows the
+/// category `bd statuses` gives each built-in status; a custom status is
+/// shown in the neutral colour.
+fn badge(status: &str) -> String {
+    let class = match status {
+        "open" => "open",
         "in_progress" | "hooked" => "working",
+        "blocked" => "waiting",
         "closed" => "done",
-        "waiting" | "blocked" => "waiting",
         _ => "neutral",
     };
     format!(
         "<span class=\"badge {class}\">{}</span>",
-        escape(&words(state))
+        escape(&words(status))
     )
+}
+
+/// Built-in Beads statuses in the order `bd statuses` lists them.
+const STATUS_ORDER: [&str; 7] = [
+    "open",
+    "in_progress",
+    "blocked",
+    "deferred",
+    "closed",
+    "pinned",
+    "hooked",
+];
+
+/// Each distinct value of `field` among `beads`, with how many beads hold
+/// it, so a filter offers exactly what the store contains. Statuses keep the
+/// Beads order; anything else, and any custom status, sorts by name.
+fn tally<'a>(
+    beads: impl Iterator<Item = &'a Bead>,
+    field: impl Fn(&'a Bead) -> &'a str,
+) -> Vec<(&'a str, usize)> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for bead in beads {
+        let value = field(bead);
+        if !value.is_empty() {
+            *counts.entry(value).or_default() += 1;
+        }
+    }
+    let mut out: Vec<_> = counts.into_iter().collect();
+    out.sort_by_key(|(value, _)| {
+        (
+            STATUS_ORDER
+                .iter()
+                .position(|s| s == value)
+                .unwrap_or(STATUS_ORDER.len()),
+            *value,
+        )
+    });
+    out
+}
+
+/// Filter options for every stored status: beads not closed (the default),
+/// all beads, then each status the store holds.
+fn status_options<'a>(beads: impl Iterator<Item = &'a Bead>) -> Vec<(String, String)> {
+    let mut options = vec![
+        (String::new(), "Not closed".to_string()),
+        ("all".to_string(), "All".to_string()),
+    ];
+    options.extend(
+        tally(beads, |b| b.status.as_str())
+            .into_iter()
+            .map(|(status, n)| (status.to_string(), format!("{} ({n})", words(status)))),
+    );
+    options
 }
 
 fn selected(on: bool) -> &'static str {
@@ -258,7 +314,7 @@ pub fn overview(view: &View) -> String {
                 "Ready",
                 s.ready.len(),
                 "as bd ready decides",
-                "/beads?state=ready".into(),
+                "/beads?ready=yes".into(),
             ),
             (
                 "In progress",
@@ -268,9 +324,9 @@ pub fn overview(view: &View) -> String {
             ),
             (
                 "Waiting",
-                s.count(|b| matches!(b.state.as_str(), "waiting" | "blocked")),
-                "blocked by other work",
-                "/beads?state=waiting".into(),
+                s.count(|b| b.status == "open" && !b.ready),
+                "open, but not ready",
+                "/beads?state=open&ready=no".into(),
             ),
         ]));
         body.push_str(&velocity(s));
@@ -351,7 +407,7 @@ fn bead_table(s: &beads::Snapshot, rows: &[(usize, &Bead)]) -> String {
         } else {
             format!(" · {}", escape(&bead.external_ref))
         };
-        write!(out, "<tr><td class=\"muted\">{position}</td><td>{}<small>{}{reference} · {}{parent}</small></td><td>{}</td><td>P{}</td></tr>", bead_link(&bead.id, &bead.title), escape(&bead.id), escape(&bead.issue_type), badge(&bead.state), bead.priority).unwrap();
+        write!(out, "<tr><td class=\"muted\">{position}</td><td>{}<small>{}{reference} · {}{parent}</small></td><td>{}</td><td>P{}</td></tr>", bead_link(&bead.id, &bead.title), escape(&bead.id), escape(&bead.issue_type), badge(&bead.status), bead.priority).unwrap();
     }
     out.push_str("</tbody></table></div>");
     out
@@ -420,40 +476,25 @@ pub fn beads(view: &View, filter: &BeadFilter) -> String {
         "Beads",
         "Search every bead in priority order, including closed history.",
     );
-    let states = [
-        ("open", "Open"),
-        ("all", "All, including closed"),
-        ("ready", "Ready"),
-        ("waiting", "Waiting or blocked"),
-        ("in_progress", "In progress"),
-        ("hooked", "Hooked"),
-        ("deferred", "Deferred"),
-        ("pinned", "Pinned"),
-        ("closed", "Closed"),
-    ];
-    let state = if filter.state.is_empty() {
-        "open"
-    } else {
-        filter.state.as_str()
-    };
-    let types: BTreeSet<&str> = s
-        .beads
-        .iter()
-        .map(|b| b.issue_type.as_str())
-        .filter(|t| !t.is_empty())
-        .collect();
     let priorities: BTreeSet<i64> = s.beads.iter().map(|b| b.priority).collect();
     let mut types_options = vec![(String::new(), "All types".to_string())];
-    types_options.extend(types.iter().map(|t| (t.to_string(), t.to_string())));
+    types_options.extend(
+        tally(s.beads.iter(), |b| b.issue_type.as_str())
+            .into_iter()
+            .map(|(t, n)| (t.to_string(), format!("{} ({n})", words(t)))),
+    );
+    let ready_options = [("", "Any"), ("yes", "Ready"), ("no", "Not ready")]
+        .map(|(v, t)| (v.to_string(), t.to_string()));
     let mut priority_options = vec![(String::new(), "All priorities".to_string())];
     priority_options.extend(priorities.iter().map(|p| (p.to_string(), format!("P{p}"))));
     write!(body, "<form class=\"filters\" action=\"/beads\" method=\"get\"><label>Search<input type=\"search\" name=\"q\" value=\"{}\" placeholder=\"Title, id or label…\"></label>", escape(&filter.q)).unwrap();
     body.push_str(&select(
         "state",
         "State",
-        state,
-        &states.map(|(v, t)| (v.to_string(), t.to_string())),
+        &filter.state,
+        &status_options(s.beads.iter()),
     ));
+    body.push_str(&select("ready", "Ready", &filter.ready, &ready_options));
     body.push_str(&select("type", "Type", &filter.issue_type, &types_options));
     body.push_str(&select(
         "priority",
@@ -485,6 +526,7 @@ pub fn beads(view: &View, filter: &BeadFilter) -> String {
         &[
             ("q", &filter.q),
             ("state", &filter.state),
+            ("ready", &filter.ready),
             ("type", &filter.issue_type),
             ("priority", &filter.priority),
         ],
@@ -519,18 +561,12 @@ pub fn epics(view: &View, filter: &BeadFilter) -> String {
         "Epics",
         "Follow each epic from its remaining children to the ones already closed.",
     );
-    let state = if filter.state.is_empty() {
-        "open"
-    } else {
-        filter.state.as_str()
-    };
     write!(body, "<form class=\"filters\" action=\"/epics\" method=\"get\"><label>Search<input type=\"search\" name=\"q\" value=\"{}\" placeholder=\"Title or id…\"></label>", escape(&filter.q)).unwrap();
     body.push_str(&select(
         "state",
         "State",
-        state,
-        &[("open", "Open"), ("all", "All"), ("closed", "Closed")]
-            .map(|(v, t)| (v.to_string(), t.to_string())),
+        &filter.state,
+        &status_options(s.beads.iter().filter(|b| b.is_epic())),
     ));
     body.push_str("<button type=\"submit\">Apply</button></form>");
     let epics: Vec<&Bead> = s
@@ -553,8 +589,8 @@ pub fn epics(view: &View, filter: &BeadFilter) -> String {
     for epic in epics {
         let children = s.children(&epic.id);
         let closed = children.iter().filter(|c| c.is_closed()).count();
-        let ready = children.iter().filter(|c| c.state == "ready").count();
-        write!(body, "<article class=\"epic-card\"><div class=\"card-top\"><small>P{} · {}</small>{}</div><h2>{}</h2><p>{}</p><progress max=\"{}\" value=\"{closed}\" aria-label=\"Closed children\"></progress><div class=\"card-bottom\"><span>{closed} / {} closed</span><span>{} open · {ready} ready</span></div></article>", epic.priority, escape(&epic.id), badge(&epic.state), bead_link(&epic.id, &epic.title), escape(&summary(&epic.description)), children.len().max(1), children.len(), children.len() - closed).unwrap();
+        let ready = children.iter().filter(|c| c.ready).count();
+        write!(body, "<article class=\"epic-card\"><div class=\"card-top\"><small>P{} · {}</small>{}</div><h2>{}</h2><p>{}</p><progress max=\"{}\" value=\"{closed}\" aria-label=\"Closed children\"></progress><div class=\"card-bottom\"><span>{closed} / {} closed</span><span>{} open · {ready} ready</span></div></article>", epic.priority, escape(&epic.id), badge(&epic.status), bead_link(&epic.id, &epic.title), escape(&summary(&epic.description)), children.len().max(1), children.len(), children.len() - closed).unwrap();
     }
     body.push_str("</div>");
     page(view, "Epics", "/epics", &body)
@@ -574,7 +610,7 @@ fn bead_relations(title: &str, rows: &[(&Bead, String)]) -> String {
             bead_link(&bead.id, &bead.title),
             escape(&bead.id),
             escape(note),
-            badge(&bead.state)
+            badge(&bead.status)
         )
         .unwrap();
     }
@@ -604,11 +640,14 @@ pub fn bead(view: &View, id: &str) -> Option<String> {
     write!(
         body,
         "<div class=\"record-meta\">{}<span>P{}</span><span>{}</span>",
-        badge(&bead.state),
+        badge(&bead.status),
         bead.priority,
         escape(&bead.issue_type)
     )
     .unwrap();
+    if bead.ready {
+        body.push_str("<span>Ready, as bd ready decides</span>");
+    }
     if !bead.assignee.is_empty() {
         write!(body, "<span>Assigned to {}</span>", escape(&bead.assignee)).unwrap();
     }
@@ -833,7 +872,7 @@ fn edge_list(
                     "<li>{}<small>bead {}{why}</small>{}</li>",
                     bead_link(&bead.id, &bead.title),
                     escape(&bead.id),
-                    badge(&bead.state)
+                    badge(&bead.status)
                 )
                 .unwrap();
             } else {

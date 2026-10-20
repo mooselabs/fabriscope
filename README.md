@@ -103,10 +103,14 @@ running the version it started with. It prints
   the last 28 complete UTC days; closed and added per period; what-if
   forecasts; the next ready beads grouped by parent; Scrolls kinds and the
   newest scrolls.
-- **Beads** — every bead in priority order, filtered by state, type, priority
-  or text. Each bead page shows its description, design, acceptance criteria
-  and notes as Markdown, what it depends on, what it blocks, related beads,
-  and scrolls that reference it.
+- **Beads** — every bead in priority order, filtered by state, readiness,
+  type, priority or text. A bead's state is its status exactly as Beads
+  stores it (`open`, `in_progress`, `closed`, or any custom status), and the
+  State and Type filters list the values the store holds, with counts.
+  Readiness is a separate filter, because it is `bd ready`'s answer about
+  dependencies, not a status. Each bead page shows its description, design,
+  acceptance criteria and notes as Markdown, what it depends on, what it
+  blocks, related beads, and scrolls that reference it.
 - **Epics** — each epic with progress over its children: beads with a
   `parent-child` dependency on it, or, with `--parent-key`, beads whose
   metadata names it. Some stores avoid `parent-child` because Beads gives it
