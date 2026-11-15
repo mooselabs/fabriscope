@@ -1,1 +1,76 @@
 /* Owned by WP6 — Held, costs, receipts, sweeper. Area styles only; shared classes live in base.css. */
+.metrics.tiles {
+  margin:20px 0;
+}
+.metrics.tiles strong {
+  font-size:28px;
+  overflow-wrap:anywhere;
+}
+.metrics.tiles strong a {
+  color:inherit;
+}
+.metrics.tiles > .metric > span {
+  overflow-wrap:anywhere;
+}
+.coverage {
+  font-size:15px;
+  margin:12px 0 4px;
+}
+.cost-sources {
+  margin:12px 0;
+  padding-left:20px;
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.6;
+}
+.held-state h2,#stop-history h2,#cost-breakdowns h2,#cost-items h2,#receipt-list h2 {
+  margin-top:8px;
+}
+.held-group,.cost-share,.stop-list {
+  margin:14px 0;
+}
+.held-group > summary,.cost-share > summary,.stop-list > summary {
+  font-weight:550;
+  cursor:pointer;
+  padding:10px 0;
+}
+.held-group .table-wrap,.stop-list .table-wrap,.cost-share .table-wrap {
+  margin-top:8px;
+}
+table.held td small,table.cost-items td small,table.receipts td small {
+  margin-top:3px;
+}
+table.held .stop-note {
+  margin-top:8px;
+  min-width:220px;
+}
+table.held .stop-note small {
+  color:inherit;
+}
+table.held td:first-child,table.cost-items td:first-child,table.receipts td:nth-child(4) {
+  min-width:200px;
+}
+table.cost-items th a {
+  color:inherit;
+}
+table.cost-items th[aria-sort] a {
+  color:var(--ink);
+  text-decoration:underline;
+}
+table.receipts dl.facts {
+  margin:0;
+}
+table.receipts code,table.held code {
+  overflow-wrap:anywhere;
+}
+.held-controls {
+  margin-top:8px;
+}
+@media(max-width:700px) {
+  .metrics.tiles strong {
+    font-size:22px;
+  }
+  table.held td:first-child,table.cost-items td:first-child,table.receipts td:nth-child(4) {
+    min-width:160px;
+  }
+}
