@@ -11,8 +11,8 @@ use super::fmt::{count, hours, money, percent, seconds, short, tokens, when, wor
 use super::layout::{not_found, page};
 use super::values::external;
 use super::{
-    PAGE_SIZE, bead_link, escape, group_link, heading, run_link, select, tone_badge, tone_class,
-    url,
+    PAGE_SIZE, bead_link, escape, heading, listed_group_link, run_link, select, tone_badge,
+    tone_class, url,
 };
 use crate::model::View;
 use crate::query::{Facets, href};
@@ -99,17 +99,10 @@ fn group_chips(view: &View, group: &BTreeMap<String, String>) -> String {
         .iter()
         .map(|(key, value)| {
             let text = format!("{}: {value}", words(key));
-            // Only a value the ledger has a group page for is a link.
-            let listed = view
-                .group_index()
-                .and_then(|g| g.get(key))
-                .is_some_and(|values| values.contains_key(value));
-            let inner = if listed {
-                group_link(key, value, &text)
-            } else {
-                escape(&text)
-            };
-            format!("<span class=\"chip\">{inner}</span>")
+            format!(
+                "<span class=\"chip\">{}</span>",
+                listed_group_link(view, key, value, &text)
+            )
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -1590,10 +1583,10 @@ mod tests {
             all.contains("href=\"/bead/wk%2D2\""),
             "subject links to its bead"
         );
-        assert!(
-            all.contains("href=\"/by/rig/alpha\""),
-            "rig is a profile group"
-        );
+        // `rig` is a profile group, but no item names the feed's `alpha`,
+        // so the chip is text, never a link to a page that does not exist.
+        assert!(all.contains("rig: alpha"), "{all}");
+        assert!(!all.contains("href=\"/by/rig/alpha\""));
         assert!(all.contains("<code>scope-exceeded</code>"));
         assert!(all.contains("$11.41"), "{all}");
         assert!(!all.contains("no cost recorded"));

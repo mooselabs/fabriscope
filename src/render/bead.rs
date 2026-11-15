@@ -11,7 +11,8 @@ use super::progress::{cost_section, progress_section};
 use super::table::bead_table;
 use super::timeline::timeline;
 use super::{
-    badge, bead_link, escape, group_link, heading, person_link, scroll_link, state_badges,
+    badge, bead_link, escape, group_link, heading, listed_group_link, person_link, scroll_link,
+    state_badges,
 };
 use crate::beads::Bead;
 use crate::model::View;
@@ -61,7 +62,7 @@ fn profile_meta(view: &View, bead: &Bead) -> (String, String) {
             .unwrap_or_default();
         let links: Vec<String> = values
             .iter()
-            .map(|v| group_link(&group.key, v, v))
+            .map(|v| listed_group_link(view, &group.key, v, v))
             .collect();
         write!(
             after,

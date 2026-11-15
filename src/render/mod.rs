@@ -89,6 +89,20 @@ pub(crate) fn group_link(group: &str, value: &str, text: &str) -> String {
     )
 }
 
+/// `group_link` when the ledger has a page for that value, else the text:
+/// a receipt or hidden row can name a value no item has.
+pub(crate) fn listed_group_link(view: &View, group: &str, value: &str, text: &str) -> String {
+    let listed = view
+        .group_index()
+        .and_then(|g| g.get(group))
+        .is_some_and(|values| values.contains_key(value));
+    if listed {
+        group_link(group, value, text)
+    } else {
+        escape(text)
+    }
+}
+
 /// A link to a run's page (`/run/{id}`).
 pub(crate) fn run_link(run: &str, text: &str) -> String {
     format!("<a href=\"/run/{}\">{}</a>", url(run), escape(text))
@@ -537,6 +551,15 @@ mod tests {
         assert_eq!(
             group_link("milestone", "v 1", "<v1>"),
             "<a href=\"/by/milestone/v%201\">&lt;v1&gt;</a>"
+        );
+        // A value no item has (a receipt's, say) has no page to link to.
+        assert_eq!(
+            listed_group_link(&view, "milestone", "v1", "v1"),
+            "<a href=\"/by/milestone/v1\">v1</a>"
+        );
+        assert_eq!(
+            listed_group_link(&view, "milestone", "<v9>", "<v9>"),
+            "&lt;v9&gt;"
         );
         assert_eq!(
             run_link("run-0002", "Run 2"),
