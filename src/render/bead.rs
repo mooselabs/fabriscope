@@ -6,7 +6,7 @@ use super::fmt::words;
 use super::groups::members_table;
 use super::layout::page;
 use super::markdown::{Links, markdown};
-use super::panels::{banner, panels, receipts_section, runs_section};
+use super::panels::{banner, panels, receipt_of, receipts_section, runs_section};
 use super::progress::{cost_section, progress_section};
 use super::table::bead_table;
 use super::timeline::timeline;
@@ -193,6 +193,7 @@ pub fn bead(view: &View, id: &str) -> Option<String> {
         write!(body, "<span class=\"label\">{}</span>", escape(label)).unwrap();
     }
     body.push_str("</div>");
+    body.push_str(&receipt_of(view, bead));
     body.push_str(&banner(view, bead));
     body.push_str(&progress_section(view, bead));
     body.push_str(&cost_section(view, bead));

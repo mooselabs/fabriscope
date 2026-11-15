@@ -370,14 +370,7 @@ pub(crate) fn receipts_section(view: &View, bead: &Bead) -> String {
         let attempt = facts
             .attempt
             .as_deref()
-            .map(|a| match view.run_for_attempt(a) {
-                Some(run) => format!(
-                    "<code>{}</code> <small>{}</small>",
-                    escape(a),
-                    run_link(&run.run, &run.run)
-                ),
-                None => format!("<code>{}</code>", escape(a)),
-            })
+            .map(|a| attempt_cell(view, a))
             .unwrap_or_default();
         write!(
             out,
@@ -399,6 +392,71 @@ pub(crate) fn receipts_section(view: &View, bead: &Bead) -> String {
         .unwrap();
     }
     out.push_str("</tbody></table></div></section>");
+    out
+}
+
+/// An attempt id, with a link to the run the feed puts it in.
+fn attempt_cell(view: &View, attempt: &str) -> String {
+    match view.run_for_attempt(attempt) {
+        Some(run) => format!(
+            "<code>{}</code> <small>{}</small>",
+            escape(attempt),
+            run_link(&run.run, &run.run)
+        ),
+        None => format!("<code>{}</code>", escape(attempt)),
+    }
+}
+
+/// On a receipt's own page: what it records and the item it is about.
+pub(crate) fn receipt_of(view: &View, bead: &Bead) -> String {
+    let Some(s) = view.snapshot() else {
+        return String::new();
+    };
+    let Some(facts) = s
+        .position(&bead.id)
+        .and_then(|i| s.derived.rows.get(i))
+        .and_then(|r| r.receipt.as_ref())
+    else {
+        return String::new();
+    };
+    let mut out = format!(
+        "<section id=\"receipt-of\"><h2>Receipt · {}</h2><dl class=\"facts\"><dt>Subject</dt><dd>{}</dd>",
+        escape(&words(&facts.kind)),
+        facts
+            .subject
+            .and_then(|i| s.beads.get(i))
+            .map(|b| bead_link(&b.id, &b.title))
+            .unwrap_or_else(|| "<span class=\"muted\">not in the ledger</span>".into())
+    );
+    if let Some(at) = &facts.at {
+        write!(out, "<dt>At</dt><dd>{}</dd>", when(at)).unwrap();
+    }
+    if let Some(actor) = &facts.actor {
+        write!(
+            out,
+            "<dt>By</dt><dd>{}</dd>",
+            super::person_link(&view.profile.person(actor).name)
+        )
+        .unwrap();
+    }
+    if let Some(attempt) = &facts.attempt {
+        write!(
+            out,
+            "<dt>Attempt</dt><dd>{}</dd>",
+            attempt_cell(view, attempt)
+        )
+        .unwrap();
+    }
+    for f in view
+        .profile
+        .receipts
+        .get(facts.rule)
+        .map(|r| r.fields.as_slice())
+        .unwrap_or_default()
+    {
+        out.push_str(&field(view, bead, f, None).unwrap_or_default());
+    }
+    out.push_str("</dl></section>");
     out
 }
 

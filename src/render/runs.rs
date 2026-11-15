@@ -99,7 +99,12 @@ fn group_chips(view: &View, group: &BTreeMap<String, String>) -> String {
         .iter()
         .map(|(key, value)| {
             let text = format!("{}: {value}", words(key));
-            let inner = if view.profile.group(key).is_some() {
+            // Only a value the ledger has a group page for is a link.
+            let listed = view
+                .group_index()
+                .and_then(|g| g.get(key))
+                .is_some_and(|values| values.contains_key(value));
+            let inner = if listed {
                 group_link(key, value, &text)
             } else {
                 escape(&text)
