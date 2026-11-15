@@ -1,13 +1,6 @@
 //! One field value as HTML, by the kind a profile panel or receipt field
 //! gives it. Every string is escaped; only `https://` values ever become
 //! external links; identifiers link inside the server when they resolve.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; WP2 panels and WP6 receipts render fields with it (BKLG-20261115-4e2r)"
-    )
-)]
 
 use super::fmt::{count, money, seconds, when};
 use super::markdown::{Links, markdown};

@@ -1,1 +1,150 @@
 /* Owned by WP2 — Bead page. Area styles only; shared classes live in base.css. */
+.record-meta .kind {
+  font-weight:600;
+  color:var(--ink);
+}
+.record-meta .chip,.record-meta .role {
+  white-space:nowrap;
+}
+.record-meta .chip a,.record-meta .role a {
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+.banner-title {
+  margin:0 0 6px;
+}
+.banner>p {
+  margin:0 0 8px;
+}
+.banner dl.facts {
+  margin:10px 0 0;
+}
+.banner dl.facts dt {
+  color:inherit;
+  opacity:.8;
+}
+.stop {
+  margin-top:14px;
+  padding-top:12px;
+  border-top:1px solid currentColor;
+  color:var(--ink);
+}
+.stop h3 {
+  margin:0 0 4px;
+}
+.stop-meta {
+  font-size:13px;
+  color:var(--muted);
+}
+.stop-detail {
+  margin:6px 0 10px;
+  padding-left:20px;
+  font-size:14px;
+}
+ol.commands {
+  margin:4px 0 12px;
+  padding-left:22px;
+}
+ol.commands li {
+  margin:4px 0;
+}
+ol.commands code {
+  display:inline-block;
+  max-width:100%;
+  background:var(--code-bg);
+  padding:2px 6px;
+  border-radius:4px;
+  font-size:13px;
+  user-select:all;
+}
+.owner-ask {
+  border:1px solid var(--line);
+  background:var(--paper);
+  border-radius:6px;
+  padding:10px 14px 0;
+  margin-top:10px;
+}
+.owner-ask h3 {
+  margin:0 0 8px;
+}
+.panel {
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:16px 20px 4px;
+}
+.panel h2 {
+  margin-top:0;
+}
+.panel dd>p:first-child {
+  margin-top:0;
+}
+dl.facts.compact {
+  grid-template-columns:max-content minmax(0,1fr);
+  gap:2px 10px;
+  margin:0;
+  font-size:12px;
+}
+.stage-detail {
+  display:block;
+  font-size:11px;
+}
+.attempt-cards {
+  list-style:none;
+  padding:0;
+  margin:0 0 16px;
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));
+  gap:12px;
+}
+.attempt-cards>li {
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:12px 14px;
+  min-width:0;
+}
+.attempt-head {
+  margin:0 0 8px;
+  overflow-wrap:anywhere;
+}
+dl.facts.usage,dl.facts.feed-facts {
+  margin:0 0 8px;
+  font-size:13px;
+}
+.feed-join {
+  font-size:13px;
+  margin:4px 0;
+  overflow-wrap:anywhere;
+}
+ol.step-strip {
+  list-style:none;
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+  padding:0;
+  margin:6px 0 0;
+}
+.cost-sources small {
+  display:block;
+}
+ol.timeline .changes {
+  margin:4px 0;
+  padding-left:18px;
+  font-size:13px;
+}
+ol.timeline .comment p {
+  margin:4px 0;
+}
+ol.timeline > li {
+  overflow-wrap:anywhere;
+}
+ol.timeline small a {
+  color:inherit;
+}
+.timeline-note {
+  font-size:13px;
+}
+.group-members h2 {
+  overflow-wrap:anywhere;
+}
