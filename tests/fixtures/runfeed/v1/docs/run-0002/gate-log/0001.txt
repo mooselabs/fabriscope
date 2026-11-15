@@ -1,0 +1,10 @@
+gate: attempt 1, iteration 1
+$ make lint
+ok
+$ make test
+test totals::half_even_rounding ... FAILED
+test totals::many_lines_sum ... FAILED
+  left: 10.01
+ right: 10.00
+146 passed, 2 failed
+gate result: fail (tests-failed)

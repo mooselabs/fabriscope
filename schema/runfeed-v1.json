@@ -1,0 +1,466 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/mooselabs/fabriscope/main/schema/runfeed-v1.json",
+  "title": "Run feed v1",
+  "description": "Producer conformance schema for runfeed.v1. The root validates feed.json; every other file kind has its own entry in $defs. Readers must be more lenient than this schema: they ignore unknown fields and render unknown enum values neutrally (docs/runfeed-v1.md).",
+  "$ref": "#/$defs/feed",
+  "$defs": {
+    "feed": {
+      "description": "feed.json, the entry point. Written last in every publish.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "producer", "factory", "revision", "generated_at", "index", "source_health", "boards"],
+      "properties": {
+        "schema": {"const": "runfeed.v1"},
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"$ref": "#/$defs/text"},
+            "version": {"$ref": "#/$defs/text"},
+            "commit": {"$ref": "#/$defs/text"}
+          }
+        },
+        "factory": {"$ref": "#/$defs/text"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "generated_at": {"$ref": "#/$defs/timestamp"},
+        "index": {"$ref": "#/$defs/feed_path"},
+        "shards": {"type": "array", "items": {"$ref": "#/$defs/feed_path"}},
+        "source_health": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gaps"],
+          "properties": {
+            "at": {"$ref": "#/$defs/timestamp"},
+            "cursor": {"type": "string", "description": "Opaque producer input cursor."},
+            "gaps": {"$ref": "#/$defs/gaps"}
+          }
+        },
+        "boards": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/name"},
+          "additionalProperties": {"$ref": "#/$defs/feed_path"}
+        }
+      }
+    },
+    "index": {
+      "description": "index.json and every index shard (index/YYYY-MM.json).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "revision", "runs"],
+      "properties": {
+        "schema": {"const": "runfeed.index.v1"},
+        "revision": {"$ref": "#/$defs/revision"},
+        "runs": {"type": "array", "items": {"$ref": "#/$defs/run_summary"}}
+      }
+    },
+    "run_summary": {
+      "description": "One run as the index lists it. Mirrors fields of the run doc it names.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run", "subject", "group", "state", "updated_at", "digest", "href", "attempts"],
+      "properties": {
+        "run": {"$ref": "#/$defs/run_id"},
+        "subject": {"$ref": "#/$defs/subject"},
+        "group": {"$ref": "#/$defs/group"},
+        "state": {"$ref": "#/$defs/run_state"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "ended_at": {"$ref": "#/$defs/timestamp"},
+        "updated_at": {"$ref": "#/$defs/timestamp"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "href": {"$ref": "#/$defs/feed_path"},
+        "cost_usd": {"type": "number", "minimum": 0},
+        "attempts": {"type": "integer", "minimum": 0},
+        "stop_code": {"$ref": "#/$defs/text"}
+      }
+    },
+    "subject_file": {
+      "description": "subjects/<key>.json: every run for one subject ref.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "subject", "runs"],
+      "properties": {
+        "schema": {"const": "runfeed.subject.v1"},
+        "subject": {"allOf": [{"$ref": "#/$defs/subject"}, {"required": ["ref"]}]},
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["run", "state", "href"],
+            "properties": {
+              "run": {"$ref": "#/$defs/run_id"},
+              "attempt": {"$ref": "#/$defs/text"},
+              "state": {"$ref": "#/$defs/run_state"},
+              "started_at": {"$ref": "#/$defs/timestamp"},
+              "href": {"$ref": "#/$defs/feed_path"}
+            }
+          }
+        }
+      }
+    },
+    "run": {
+      "description": "runs/<run>.json, the run doc.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "run", "refs", "subject", "group", "state", "updated_at", "attempts", "links", "documents", "facts", "gaps", "digest"],
+      "properties": {
+        "schema": {"const": "runfeed.run.v1"},
+        "run": {"$ref": "#/$defs/run_id"},
+        "refs": {
+          "description": "Identifiers of what the run worked from and produced. Free string map; the named keys are conventional.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/name"},
+          "additionalProperties": {"type": "string"},
+          "properties": {
+            "attempt": {"type": "string", "description": "Id of the current attempt."},
+            "contract": {"type": "string"},
+            "branch": {"type": "string"},
+            "commit": {"type": "string"},
+            "tree": {"type": "string"}
+          }
+        },
+        "subject": {"$ref": "#/$defs/subject"},
+        "group": {"$ref": "#/$defs/group"},
+        "state": {"$ref": "#/$defs/run_state"},
+        "current_step": {"$ref": "#/$defs/text"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "ended_at": {"$ref": "#/$defs/timestamp"},
+        "updated_at": {"$ref": "#/$defs/timestamp"},
+        "attempts": {"type": "array", "items": {"$ref": "#/$defs/attempt"}},
+        "costs": {"$ref": "#/$defs/cost"},
+        "roles": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/name"},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "model": {"$ref": "#/$defs/text"},
+              "provider": {"$ref": "#/$defs/text"}
+            }
+          }
+        },
+        "timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wall_hours": {"type": "number", "minimum": 0},
+            "active_hours": {"type": "number", "minimum": 0},
+            "timebox": {"$ref": "#/$defs/text"},
+            "timebox_hours_max": {"type": "number", "minimum": 0},
+            "over_timebox": {"type": "boolean"}
+          }
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": {"$ref": "#/$defs/text"},
+              "provider": {"$ref": "#/$defs/text"},
+              "model": {"$ref": "#/$defs/text"},
+              "started_at": {"$ref": "#/$defs/timestamp"}
+            }
+          }
+        },
+        "outcome": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["facts"],
+          "properties": {"facts": {"$ref": "#/$defs/facts"}}
+        },
+        "stop": {"$ref": "#/$defs/stop"},
+        "links": {"$ref": "#/$defs/links"},
+        "documents": {"type": "array", "items": {"$ref": "#/$defs/document"}},
+        "facts": {"$ref": "#/$defs/facts"},
+        "gaps": {"$ref": "#/$defs/gaps"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "number", "state", "steps", "facts", "links"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text", "description": "SHOULD equal the work ledger's attempt id when the producer knows it."},
+        "number": {"type": "integer", "minimum": 1},
+        "state": {"$ref": "#/$defs/run_state"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "ended_at": {"$ref": "#/$defs/timestamp"},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "facts": {"$ref": "#/$defs/facts"},
+        "costs": {"$ref": "#/$defs/cost"},
+        "links": {"$ref": "#/$defs/links"},
+        "stop": {"$ref": "#/$defs/stop"}
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "facts", "links", "documents"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text", "description": "Unique within the run."},
+        "kind": {"$ref": "#/$defs/name", "description": "Open set. Core kinds: context, implement, gate, review, publish, ci, ship, recovery, plan, other."},
+        "name": {"$ref": "#/$defs/text"},
+        "label": {"$ref": "#/$defs/text"},
+        "iteration": {"type": "integer", "minimum": 1},
+        "state": {"$ref": "#/$defs/step_state"},
+        "result": {"$ref": "#/$defs/step_result"},
+        "result_detail": {"$ref": "#/$defs/text"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "ended_at": {"$ref": "#/$defs/timestamp"},
+        "seconds": {"type": "number", "minimum": 0},
+        "failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {"$ref": "#/$defs/text"},
+            "text": {"$ref": "#/$defs/text"}
+          }
+        },
+        "session": {"$ref": "#/$defs/text", "description": "Id of an entry in the run's sessions."},
+        "facts": {"$ref": "#/$defs/facts"},
+        "links": {"$ref": "#/$defs/links"},
+        "documents": {
+          "description": "Ids of entries in the run's documents.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/doc_id"}
+        }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$", "maxLength": 128, "description": "Opaque to readers."},
+        "value": {"type": ["string", "number", "boolean"]},
+        "type": {"enum": ["seconds", "hours", "usd", "tokens", "count", "percent", "sha", "tree", "bool", "id", "timestamp", "text"]},
+        "label": {"$ref": "#/$defs/text"},
+        "tone": {"enum": ["good", "warn", "bad"]},
+        "ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": {"enum": ["item", "run", "attempt", "commit", "tree"]},
+            "id": {"$ref": "#/$defs/text"}
+          }
+        }
+      }
+    },
+    "facts": {"type": "array", "items": {"$ref": "#/$defs/fact"}},
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "gaps"],
+      "properties": {
+        "usd": {"type": "number", "minimum": 0},
+        "usd_with_overhead": {"type": "number", "minimum": 0},
+        "tokens": {"$ref": "#/$defs/tokens"},
+        "by_model": {
+          "type": "object",
+          "propertyNames": {"type": "string", "minLength": 1},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "usd": {"type": "number", "minimum": 0},
+              "tokens": {"$ref": "#/$defs/tokens"}
+            }
+          }
+        },
+        "by_role": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/name"},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {"usd": {"type": "number", "minimum": 0}}
+          }
+        },
+        "complete": {"type": "boolean", "description": "False when any usage the producer knows of is missing; gaps says which."},
+        "gaps": {"$ref": "#/$defs/gaps"}
+      }
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {"type": "integer", "minimum": 0},
+        "output": {"type": "integer", "minimum": 0},
+        "cache_read": {"type": "integer", "minimum": 0},
+        "cache_write": {"type": "integer", "minimum": 0}
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rel"],
+      "anyOf": [{"required": ["href"]}, {"required": ["ref"]}],
+      "properties": {
+        "rel": {"enum": ["pull_request", "commit", "branch", "tree", "ci", "item", "attempt", "external"]},
+        "href": {"type": "string", "pattern": "^[a-z][a-z0-9+.-]*:", "maxLength": 2048, "description": "Absolute URL. Readers make only https:// links clickable."},
+        "ref": {"$ref": "#/$defs/text"},
+        "text": {"$ref": "#/$defs/text"}
+      }
+    },
+    "links": {"type": "array", "items": {"$ref": "#/$defs/link"}},
+    "stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {"$ref": "#/$defs/text"},
+        "cause": {"$ref": "#/$defs/text"},
+        "class": {"$ref": "#/$defs/text"},
+        "title": {"$ref": "#/$defs/text"},
+        "why": {"$ref": "#/$defs/text"},
+        "detail": {"type": "array", "items": {"type": "string"}},
+        "next": {"$ref": "#/$defs/text"},
+        "commands": {"type": "array", "items": {"type": "string"}},
+        "owner_ask": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "problem": {"type": "string"},
+            "question": {"type": "string"},
+            "recommended": {"type": "string"},
+            "if_yes": {"type": "string"},
+            "if_not": {"type": "string"}
+          }
+        },
+        "at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "document": {
+      "description": "A document descriptor. Only ready, live and truncated documents have readable pages.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "content_type", "pages", "state"],
+      "properties": {
+        "id": {"$ref": "#/$defs/doc_id"},
+        "kind": {"enum": ["transcript", "log", "diagnostic", "notes", "contract", "receipt", "text"]},
+        "title": {"$ref": "#/$defs/text"},
+        "content_type": {"enum": ["text/plain", "application/x-ndjson", "application/json"]},
+        "bytes": {"type": "integer", "minimum": 0},
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["href"],
+            "properties": {
+              "href": {"$ref": "#/$defs/feed_path"},
+              "bytes": {"type": "integer", "minimum": 0},
+              "first_at": {"$ref": "#/$defs/timestamp"},
+              "last_at": {"$ref": "#/$defs/timestamp"}
+            }
+          }
+        },
+        "state": {"enum": ["ready", "pending", "live", "unavailable", "withheld", "expired", "truncated"]},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"$ref": "#/$defs/text"},
+            "digest": {"$ref": "#/$defs/text"}
+          }
+        },
+        "redaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy", "replaced"],
+          "properties": {
+            "policy": {"$ref": "#/$defs/text"},
+            "replaced": {"type": "integer", "minimum": 0}
+          }
+        }
+      },
+      "if": {"required": ["state"], "properties": {"state": {"enum": ["pending", "unavailable", "withheld", "expired"]}}},
+      "then": {"properties": {"pages": {"maxItems": 0}}}
+    },
+    "board": {
+      "description": "boards/<name>.json: a producer read model wrapped for display.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "name", "generated_at", "body"],
+      "properties": {
+        "schema": {"const": "runfeed.board.v1"},
+        "name": {"$ref": "#/$defs/name"},
+        "title": {"$ref": "#/$defs/text"},
+        "source_schema": {"$ref": "#/$defs/text"},
+        "generated_at": {"$ref": "#/$defs/timestamp"},
+        "body": {"description": "Any JSON value. Readers render it generically."}
+      }
+    },
+    "transcript_turn": {
+      "description": "One line of an application/x-ndjson transcript page.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text"],
+      "properties": {
+        "at": {"$ref": "#/$defs/timestamp"},
+        "role": {"enum": ["system", "user", "assistant", "thinking", "tool_call", "tool_result"]},
+        "tool": {"$ref": "#/$defs/text"},
+        "model": {"$ref": "#/$defs/text"},
+        "text": {"type": "string"},
+        "omitted_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "change": {
+      "description": "One line of changes.jsonl.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "at", "run", "digest"],
+      "properties": {
+        "revision": {"$ref": "#/$defs/revision"},
+        "at": {"$ref": "#/$defs/timestamp"},
+        "run": {"$ref": "#/$defs/run_id"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "subject": {
+      "description": "The work item a run is for. At least one of ref (an external, human-facing reference) and id.",
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [{"required": ["ref"]}, {"required": ["id"]}],
+      "properties": {
+        "ref": {"$ref": "#/$defs/text"},
+        "id": {"$ref": "#/$defs/text"},
+        "title": {"$ref": "#/$defs/text"}
+      }
+    },
+    "group": {
+      "description": "Free string map of grouping dimensions, such as rig or repository.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "additionalProperties": {"type": "string"}
+    },
+    "run_state": {"enum": ["running", "passed", "failed", "stopped", "declined", "superseded", "unknown"]},
+    "step_state": {"enum": ["pending", "running", "done", "unknown"]},
+    "step_result": {"enum": ["pass", "fail", "running", "skipped", "cancelled", "unknown"]},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\u0000-\\u001f]+$"},
+    "doc_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$", "maxLength": 64},
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]*$", "maxLength": 64},
+    "text": {"type": "string", "minLength": 1},
+    "gaps": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "revision": {"type": "integer", "minimum": 0},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "timestamp": {
+      "description": "RFC 3339 in UTC.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    },
+    "feed_path": {
+      "description": "A path relative to the feed root: '/'-separated file names, no segment empty or starting with '.', so it cannot escape the root.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_~%-][A-Za-z0-9._~%-]*(/[A-Za-z0-9_~%-][A-Za-z0-9._~%-]*)*$"
+    }
+  }
+}

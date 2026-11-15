@@ -1,0 +1,64 @@
+{
+  "schema": "runfeed.index.v1",
+  "revision": 42,
+  "runs": [
+    {
+      "run": "run-0001",
+      "subject": {
+        "ref": "WORK-0001",
+        "title": "Add CSV export to the orders page"
+      },
+      "group": {
+        "rig": "alpha",
+        "repository": "acme/widgets"
+      },
+      "state": "running",
+      "started_at": "2026-11-15T10:00:00Z",
+      "updated_at": "2026-11-15T11:58:00Z",
+      "digest": "c9b06bf95e8bdede67e7a2a5a710f7871f60c824fdfb4240d6fe53b732e55319",
+      "href": "runs/run-0001.json",
+      "cost_usd": 1.42,
+      "attempts": 1
+    },
+    {
+      "run": "run-0003",
+      "subject": {
+        "ref": "WORK-0003",
+        "title": "Move reports to the new table"
+      },
+      "group": {
+        "rig": "beta",
+        "repository": "acme/reports"
+      },
+      "state": "stopped",
+      "started_at": "2026-11-15T07:00:00Z",
+      "ended_at": "2026-11-15T09:15:00Z",
+      "updated_at": "2026-11-15T09:20:00Z",
+      "digest": "6de8c03b76692faceb718a4e32a989036322632fbfbcbf5a71f95abfbb27e070",
+      "href": "runs/run-0003.json",
+      "cost_usd": 0.88,
+      "attempts": 1,
+      "stop_code": "scope-exceeded"
+    },
+    {
+      "run": "run-0002",
+      "subject": {
+        "ref": "WORK-0002",
+        "id": "item-7f3a",
+        "title": "Fix rounding in invoice totals"
+      },
+      "group": {
+        "rig": "alpha",
+        "repository": "acme/widgets"
+      },
+      "state": "passed",
+      "started_at": "2026-11-14T08:00:00Z",
+      "ended_at": "2026-11-14T15:30:00Z",
+      "updated_at": "2026-11-14T15:31:00Z",
+      "digest": "91e4e0fdc43a654d0e52c6c900a55ad7926a01a6043069ef7366ff01a9ddc3eb",
+      "href": "runs/run-0002.json",
+      "cost_usd": 5.37,
+      "attempts": 2
+    }
+  ]
+}
