@@ -564,12 +564,8 @@ impl Source {
     pub fn read(&self, href: &str) -> Result<Vec<u8>, String> {
         check_href(href)?;
         match self {
-            Source::Dir(dir) => {
-                std::fs::read(dir.join(href)).map_err(|e| format!("run feed {href}: {e}"))
-            }
-            Source::Url { base, .. } => Err(format!(
-                "run feed {base}/{href}: reading over HTTP is not built yet"
-            )),
+            Source::Dir(dir) => client::read_dir(dir, href),
+            Source::Url { base, token_file } => client::read_url(base, token_file.as_deref(), href),
         }
     }
 

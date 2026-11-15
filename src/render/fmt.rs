@@ -1,13 +1,6 @@
 //! Formatting helpers shared by every page: words, short ids, times,
 //! durations, money, tokens, counts and percentages. Each returns plain text
 //! except `when`, which returns a `<time>` element; escape the text ones.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; WP1–WP6 format with it (BKLG-20261115-4e2r)"
-    )
-)]
 
 use super::escape;
 

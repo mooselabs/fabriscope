@@ -1,0 +1,15 @@
+{
+  "schema": "runfeed.v1",
+  "producer": {
+    "name": "extra-fixture",
+    "version": "1"
+  },
+  "factory": "extra",
+  "revision": 1,
+  "generated_at": "2026-11-15T09:00:00Z",
+  "index": "index.json",
+  "source_health": {
+    "gaps": []
+  },
+  "boards": {}
+}
