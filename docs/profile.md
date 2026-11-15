@@ -79,10 +79,15 @@ matches any one of its values; an empty condition matches everything.
   from the bead the group value names and gives the ordered subgroup values.
   Keys are lower case and may not be a reserved query key (`q`, `type`,
   `kind`, `priority`, `state`, `dstate`, `ready`, `person`, `epic`, `page`,
-  `from`, `to`, `days`, `sort`).
+  `from`, `to`, `days`, `sort`, `by`, `event`). `by` picks what a flow or
+  held chart is split by, and `event` an /activity event kind.
 - `[people] segments` — how many leading `/` segments of a name identify a
-  person. `[[people.roles]] key, label, from` names who holds each role
-  (`event:` sources read the bead's history). `[[people.classes]] prefix,
+  person. `[[people.roles]] key, label, from` names who holds each role.
+  Sources are tried in order. A field or metadata source is read from the
+  snapshot; an `event:<kind>` source is the actor of the bead's first
+  history event of that kind, so a role that only an event names appears on
+  /people and /person/{name} once the bead's thread has been read, and a
+  profile without `[events]` never fills it. `[[people.classes]] prefix,
   class, segments` classes names apart, such as factory seats.
 - `[[panels]] key, title, when, fields = [{path, label, kind, unit?, repo?}]`
   — typed field panels on the bead page. Kinds: `text`, `list`, `markdown`,
@@ -111,6 +116,27 @@ matches any one of its values; an empty condition matches everything.
   "field:started_at"`, `wip_status = ["in_progress"]`, decisions are open
   `decision` rows since `field:created_at`.
 - `[labels]` — labels for opaque fact keys, such as a run feed's.
+
+## What each section turns on
+
+A tab shows only when there is something behind it, so a store without a
+profile looks as it always did.
+
+| Tab or page | Needs |
+| --- | --- |
+| Held (`/held`) | a `[[states]]` entry that overrides ready or has the `bad` tone |
+| Receipts (`/receipts`) | a `[[receipts]]` entry |
+| a group tab (`/by/{key}`) | a `[[groups]]` entry |
+| People, Activity | always; roles and history events need `[[people.roles]]` and `[events]` |
+| Flow | always; claim times and decisions read `[flow]` |
+| Runs, Boards | `--runs` |
+| Costs | a Beads store or `--runs`; spend comes from provenance `used` events and the feed, and an unknown amount shows as unknown, never $0 |
+
+An absent `state` filter means two things. The lists (/beads, /epics,
+/held, /by/…) show every item not closed. The pages that count over time
+(/flow/…, /activity, /people, /costs) count any status. Only an explicit
+`state=` value narrows those, and their links to a list carry
+`state=all` so the list shows the same items.
 
 ## The work fixture
 

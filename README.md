@@ -66,8 +66,8 @@ Open <http://127.0.0.1:8787>. Stop with Ctrl-C.
 | `--beads-url URL` | A `bd serve` that is already running. |
 | `--parent-key PATH` | A dot-separated metadata path that names a bead's parent by id or external reference, for stores that keep membership in metadata instead of parent-child links. |
 | `--profile FILE` | A `fabriscope.profile.v1` file saying how the store uses its metadata: row classes, kinds, states, groups, people, panels, history events, receipts and links. See [docs/profile.md](docs/profile.md). |
-| `--runs URL\|DIR` | A run feed (`runfeed.v1`, see [docs/runfeed-v1.md](docs/runfeed-v1.md)) to show beside the work. |
-| `--runs-token-file FILE` | A bearer token for a `--runs` URL. |
+| `--runs URL\|DIR` | A run feed (`runfeed.v1`, see [docs/runfeed-v1.md](docs/runfeed-v1.md)) to show beside the work: a directory, or a URL. A URL must be plain `http://`; `https://` is refused, so serve the feed on loopback or a private network. Fabriscope polls `feed.json` every 30 s. |
+| `--runs-token-file FILE` | A bearer token for a `--runs` URL, first non-empty line, re-read on every request. |
 | `--beads-token-file FILE` | A bearer token for that `bd serve`, first non-empty line, re-read on every request. |
 | `--scrolls STORE` | A Scrolls store directory, usually `…/.scrolls`. |
 | `--bind ADDR` | Address to listen on. Default `127.0.0.1:8787`. |
@@ -80,6 +80,12 @@ Open <http://127.0.0.1:8787>. Stop with Ctrl-C.
 
 `fabriscope update` installs a newer release now, if there is one, and exits.
 `fabriscope profile check FILE` validates a profile and prints it resolved.
+
+A profile and a run feed are both optional. Without them Fabriscope shows
+what Beads stores, and the tabs that need them stay hidden; with them it
+adds the pages under **Ledger views** below. The environment variable
+`FABRISCOPE_RUNS_POLL_MS` shortens the feed poll for the tests; it is not a
+setting to use in production.
 
 ## Updates
 
@@ -142,6 +148,35 @@ running the version it started with. It prints
 - **Scrolls** — every record, filtered by kind, status or text. Each scroll
   page shows its body, the links from and to it grouped by relation, its
   aliases and its fields.
+
+### Ledger views
+
+With a profile ([docs/profile.md](docs/profile.md)) and a run feed
+([docs/runfeed-v1.md](docs/runfeed-v1.md)), every page links to the
+others: a bead to its group, lane, people, runs, attempts and receipts; a
+run back to its bead.
+
+- **Groups** (`/by/{group}`) — beads by a profile group, such as a
+  milestone, and each value's lanes (`/by/{group}/{value}`).
+- **People** and **Activity** — who holds, created or claimed what, with
+  factory seats classed apart from people; one timeline of history events,
+  comments, provenance and run starts and ends, filtered by the same facets
+  as the lists and a date range.
+- **Flow** — items created and claimed per period, cycle time, the age of
+  open work and decisions waiting for an answer, each split by a group,
+  type, kind, priority, claimant or creator (`?by=`).
+- **Held** — work a profile state holds back, why it stopped and since when,
+  with its run and attempt; stop history over a date range.
+- **Costs** — spend by attempt, run, group and model from provenance `used`
+  events and the run feed. A missing amount shows as unknown, never as $0.
+- **Receipts** — receipt rows by kind, joined to the bead they are about.
+- **Runs** — every run in the feed. A run page shows its attempts, steps,
+  facts and costs; its documents (logs and transcripts) open as plain text,
+  a page at a time.
+- **Boards** — whatever JSON the feed publishes as a board, shown as facts,
+  tables and lists, with the raw JSON beside it.
+- **Search** — finds beads, people, group values and runs; an exact
+  reference opens its bead.
 
 Links in documents connect the two stores. A relative link resolves to the
 scroll at that path (or the one scroll whose path ends with it); a
@@ -255,8 +290,12 @@ access keep that binding and forward it, for example
 It serves rendered pages and its own CSS and JavaScript, never files from
 disk. Markdown is rendered without raw HTML; images become links so a
 document cannot load third-party content; links leave the server only for
-`http`, `https` and `mailto` destinations. Every response carries a strict
-Content Security Policy.
+`http`, `https` and `mailto` destinations. Profile panels and run feed
+links become external links only for `https://`. Run documents, including
+transcripts and logs, are shown as escaped plain text, never as HTML or
+Markdown, and feed files are read only inside the `--runs` directory (or
+under the feed URL, each path segment percent-encoded). Every response
+carries a strict Content Security Policy.
 
 ## Health
 
@@ -264,7 +303,10 @@ Content Security Policy.
 installed by the updater, and, for each store shown, when it was last read,
 its commit or Dolt revision, record counts and the last error. With a local
 `bd`, `provenance` counts the logs read, the reads under way and the reads
-that failed.
+that failed; `history` does the same for comment threads. With `--runs`,
+`runs` gives the feed's revision, run count, gaps and last error, and how
+many run docs and document bytes the cache holds. A failed feed read answers
+503 until the next good poll.
 
 ## Development
 
@@ -282,6 +324,15 @@ also runs copies of the binary against a fake GitHub release. These check
 `fabriscope update`, the background update, the opt-out, and that a bad
 checksum or a wrong program is never installed.
 
+The other `tests/live_*.rs` files run the binary against the work fixture
+(`tests/fixtures/work/`), its profile and the golden run feed
+(`tests/fixtures/runfeed/v1/`): bead pages, lists, flow, history, people,
+held work, costs, receipts and runs. `tests/live_crawl.rs` follows every
+internal link from the overview, with and without a profile and feed, and
+fails on any 404, 500, unfilled template or inline style.
+`python3 tests/runfeed_schema.py` checks the golden feed against
+[docs/runfeed-v1.md](docs/runfeed-v1.md).
+
 `shellcheck scripts/install.sh` lints the installer.
 
 The theme browser checks run against the real binary with disposable Beads and
@@ -294,6 +345,9 @@ python3 -m pip install playwright==1.64.0
 playwright install chromium
 python3 tests/theme.py --binary target/debug/fabriscope
 ```
+
+`tests/theme.py` also runs every `tests/browser_*.py` check: the ledger
+pages in light and dark, at desktop width and at 320 px.
 
 ## Releasing
 
