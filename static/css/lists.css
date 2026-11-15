@@ -1,1 +1,76 @@
 /* Owned by WP1 — Lists, groups, search, overview. Area styles only; shared classes live in base.css. */
+/* Bead table: group chips and the holder under a bead's title. */
+.row-facts {
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px 8px;
+  margin-top:6px;
+  font-size:12px;
+}
+.chip {
+  display:inline-block;
+  border-radius:5px;
+  padding:1px 7px;
+  background:var(--badge-neutral-bg);
+  overflow-wrap:anywhere;
+}
+.chip a {
+  color:var(--badge-neutral);
+}
+.holder {
+  color:var(--muted);
+  overflow-wrap:anywhere;
+}
+td .badge+.badge {
+  margin-left:4px;
+}
+/* Under way: held rows read as stopped. */
+.progress-list tr.stopped td:first-child {
+  box-shadow:inset 3px 0 0 var(--red);
+}
+.stop-line {
+  color:var(--red);
+  overflow-wrap:anywhere;
+}
+/* Group pages. */
+.group-tabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 18px;
+  margin:20px 0 12px;
+  font-size:14px;
+}
+.group-tabs a {
+  color:var(--muted);
+  padding:4px 0;
+}
+.group-tabs a[aria-current] {
+  color:var(--ink);
+  box-shadow:0 2px var(--blue);
+}
+.group-bead {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 10px;
+  margin:-8px 0 8px;
+}
+.group-values td small,.group-strip td small {
+  display:block;
+}
+#lanes,#members,#by-group {
+  margin-top:28px;
+}
+/* Search. */
+ul.hits {
+  margin:0;
+  padding-left:18px;
+  font-size:14px;
+}
+ul.hits li {
+  padding:3px 0;
+  overflow-wrap:anywhere;
+}
+#people,#groups,#scrolls,#runs,#beads {
+  margin-top:24px;
+}

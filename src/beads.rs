@@ -238,10 +238,6 @@ impl Snapshot {
         self.order.iter().map(|&i| &self.beads[i])
     }
 
-    pub fn count(&self, predicate: impl Fn(&Bead) -> bool) -> usize {
-        self.beads.iter().filter(|b| predicate(b)).count()
-    }
-
     pub fn children(&self, id: &str) -> Vec<&Bead> {
         self.ordered().filter(|b| b.parent() == Some(id)).collect()
     }

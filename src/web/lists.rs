@@ -5,16 +5,19 @@
 
 use super::respond;
 use crate::app::{App, view_in_progress};
-use crate::model::BeadFilter;
+use crate::filters;
 use crate::query::Facets;
 use crate::render;
 use axum::{
     Router,
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
 };
+
+/// Held beads read ahead from the overview, besides those in progress.
+const HELD_AHEAD: usize = 50;
 
 pub fn routes() -> Router<App> {
     Router::new()
@@ -27,24 +30,31 @@ pub fn routes() -> Router<App> {
 }
 
 async fn overview(State(app): State<App>) -> Html<String> {
-    app.want_provenance(view_in_progress(&app).await).await;
+    let mut ahead = view_in_progress(&app).await;
+    {
+        let view = app.view.read().await;
+        if let Some(s) = view.snapshot() {
+            ahead.extend(filters::read_ahead(s, &view.profile, HELD_AHEAD));
+        }
+    }
+    app.want_provenance(ahead).await;
     Html(render::overview(&*app.view.read().await))
 }
 
-async fn beads_page(State(app): State<App>, Query(filter): Query<BeadFilter>) -> Response {
+async fn beads_page(State(app): State<App>, Query(facets): Query<Facets>) -> Response {
     let view = app.view.read().await;
     if view.beads.is_none() {
         return (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response();
     }
-    Html(render::beads(&view, &filter)).into_response()
+    Html(render::beads(&view, &facets)).into_response()
 }
 
-async fn epics_page(State(app): State<App>, Query(filter): Query<BeadFilter>) -> Response {
+async fn epics_page(State(app): State<App>, Query(facets): Query<Facets>) -> Response {
     let view = app.view.read().await;
     if view.beads.is_none() {
         return (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response();
     }
-    Html(render::epics(&view, &filter)).into_response()
+    Html(render::epics(&view, &facets)).into_response()
 }
 
 async fn group_page(
@@ -75,7 +85,12 @@ async fn lane_page(
     respond(&view, page)
 }
 
+/// An exact bead id or external ref goes straight to the bead (303);
+/// anything else is a page of matches.
 async fn search_page(State(app): State<App>, Query(facets): Query<Facets>) -> Response {
     let view = app.view.read().await;
+    if let Some(bead) = filters::exact(&view, &facets.q) {
+        return Redirect::to(&format!("/bead/{}", render::url(&bead.id))).into_response();
+    }
     respond(&view, Some(render::search::search(&view, &facets)))
 }

@@ -48,6 +48,9 @@ pub struct ReceiptFacts {
 /// receipt indexes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Derived {
+    /// The profile these facts came from, so code given only a snapshot (a
+    /// bead table, say) can label kinds, states and groups.
+    pub profile: std::sync::Arc<Profile>,
     pub rows: Vec<RowFacts>,
     /// Group key → value → bead indexes, values sorted.
     pub groups: BTreeMap<String, BTreeMap<String, Vec<usize>>>,
@@ -62,7 +65,10 @@ pub struct Derived {
 impl Derived {
     /// Applies `profile` to every bead of `snapshot` at `now`.
     pub fn build(snapshot: &Snapshot, profile: &Profile, now: DateTime<Utc>) -> Self {
-        let mut out = Derived::default();
+        let mut out = Derived {
+            profile: std::sync::Arc::new(profile.clone()),
+            ..Default::default()
+        };
         for (i, bead) in snapshot.beads.iter().enumerate() {
             let class = profile
                 .rows

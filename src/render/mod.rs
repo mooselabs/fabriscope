@@ -382,7 +382,7 @@ pub(crate) fn placeholder(view: &View, title: &str, tab: &str, owner: &str) -> S
 mod tests {
     use super::*;
     use crate::beads::{self, Bead};
-    use crate::model::{BeadFilter, Feed, ScrollFilter, View};
+    use crate::model::{Feed, ScrollFilter, View};
     use crate::provenance;
     use crate::scrolls::{self, Scroll};
     use std::sync::Arc;
@@ -485,7 +485,7 @@ mod tests {
         let page = overview(&view);
         assert!(!page.contains("href=\"/scrolls\""));
         assert!(page.contains("href=\"/beads\""), "the Work section");
-        assert!(beads(&view, &BeadFilter::default()).contains("href=\"/epics\""));
+        assert!(beads(&view, &Facets::default()).contains("href=\"/epics\""));
         assert!(scrolls(&view, &ScrollFilter::default()).contains("404"));
     }
 
