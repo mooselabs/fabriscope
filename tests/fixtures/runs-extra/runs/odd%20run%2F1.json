@@ -1,0 +1,61 @@
+{
+  "schema": "runfeed.run.v1",
+  "run": "odd run/1",
+  "refs": {
+    "attempt": "att odd/1"
+  },
+  "subject": {
+    "ref": "WEIRD a/b?#ü",
+    "title": "Odd <names> & co"
+  },
+  "group": {
+    "rig": "gamma"
+  },
+  "state": "passed",
+  "started_at": "2026-11-15T08:00:00Z",
+  "ended_at": "2026-11-15T08:30:00Z",
+  "updated_at": "2026-11-15T08:31:00Z",
+  "attempts": [
+    {
+      "id": "att odd/1",
+      "number": 1,
+      "state": "passed",
+      "steps": [
+        {
+          "id": "s odd/1",
+          "kind": "deploy",
+          "state": "done",
+          "result": "pass",
+          "seconds": 30,
+          "facts": [],
+          "links": [],
+          "documents": [
+            "notes"
+          ]
+        }
+      ],
+      "facts": [],
+      "links": []
+    }
+  ],
+  "links": [],
+  "documents": [
+    {
+      "id": "notes",
+      "kind": "notes",
+      "title": "Notes about odd names",
+      "content_type": "text/plain",
+      "bytes": 44,
+      "pages": [
+        {
+          "href": "docs/odd%20run%2F1/notes/0001.txt",
+          "bytes": 44
+        }
+      ],
+      "state": "ready"
+    }
+  ],
+  "facts": [],
+  "gaps": [],
+  "digest": "162abf69bd08d19380fc8701b970d1ee77f2a7d216a9b533f132ab89a4f84ff3"
+}
