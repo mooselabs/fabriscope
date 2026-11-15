@@ -1001,6 +1001,9 @@ pub(crate) mod tests {
         assert_eq!(nearest_rank(&eleven, 90), Some(10.0), "⌈9.9⌉ = 10");
         assert_eq!(nearest_rank(&eleven, 100), Some(11.0));
         assert_eq!(nearest_rank(&eleven, 0), Some(1.0));
+        // Integer ranks: a float 0.9 × 30 would round up to rank 28.
+        let thirty: Vec<f64> = (1..=30).map(f64::from).collect();
+        assert_eq!(nearest_rank(&thirty, 90), Some(27.0));
     }
 
     #[test]

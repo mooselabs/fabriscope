@@ -15,6 +15,7 @@ use super::layout::page;
 use super::svg::{Bar, hbars};
 use super::{bead_link, escape, facets_form, heading, run_link, select, url};
 use crate::beads::Bead;
+use crate::flow::nearest_rank;
 use crate::model::View;
 use crate::profile::{Source, StateRule, Tone};
 use crate::provenance::{self, Progress};
@@ -45,15 +46,6 @@ fn fact_label(view: &View, source: &Source) -> String {
         text = first.to_uppercase() + &text[1..];
     }
     text
-}
-
-/// The nearest-rank percentile `p` (0–1) of sorted `values`.
-pub(super) fn nearest_rank(sorted: &[f64], p: f64) -> Option<f64> {
-    if sorted.is_empty() {
-        return None;
-    }
-    let rank = (p * sorted.len() as f64).ceil().max(1.0) as usize;
-    Some(sorted[rank.min(sorted.len()) - 1])
 }
 
 fn instant(at: &str) -> Option<DateTime<Utc>> {
@@ -597,8 +589,8 @@ fn stop_history(view: &View, facets: &Facets, now: DateTime<Utc>) -> String {
             "; no run feed"
         }
     );
-    let p50 = nearest_rank(&resumed, 0.5);
-    let p90 = nearest_rank(&resumed, 0.9);
+    let p50 = nearest_rank(&resumed, 50);
+    let p90 = nearest_rank(&resumed, 90);
     let span = |v: Option<f64>| v.map(seconds).unwrap_or_else(|| "unknown".into());
     out.push_str(&tiles(&[
         (
@@ -716,16 +708,6 @@ mod tests {
         axum::extract::Query::<Facets>::try_from_uri(&uri)
             .unwrap()
             .0
-    }
-
-    #[test]
-    fn nearest_rank_percentiles() {
-        assert_eq!(nearest_rank(&[], 0.5), None);
-        assert_eq!(nearest_rank(&[7.0], 0.9), Some(7.0));
-        let v = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        assert_eq!(nearest_rank(&v, 0.5), Some(5.0));
-        assert_eq!(nearest_rank(&v, 0.9), Some(9.0));
-        assert_eq!(nearest_rank(&[1.0, 2.0, 3.0], 0.5), Some(2.0));
     }
 
     #[test]
