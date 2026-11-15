@@ -4,14 +4,16 @@
 //! Where a bead is up to, from its provenance log: the stage bar, the
 //! compact bar in tables, and the progress section of a bead's page.
 
-use super::escape;
-use super::fmt::{when, words};
+use super::fmt::{count, money, seconds, tokens, when, words};
+use super::panels::{feed_label, feed_value, joined};
+use super::{escape, run_link, tone_badge, url};
 use crate::beads::Bead;
 use crate::model::View;
-use crate::provenance::{self, Fact, Mark, Note, Progress, Stage};
+use crate::provenance::{self, Fact, Mark, Note, Progress, Stage, Usage};
+use crate::runs::{self, cache::Fetch};
 use std::fmt::Write;
 
-fn fact(fact: &Fact) -> String {
+pub(super) fn fact(fact: &Fact) -> String {
     match fact {
         Fact::Text(text) => format!("<span class=\"fact\">{}</span>", escape(text)),
         Fact::Code { full, short } => format!(
@@ -28,8 +30,9 @@ fn fact(fact: &Fact) -> String {
 }
 
 /// The stages as a line of steps. The compact form is dots only, each named
-/// on hover and to screen readers.
-fn stage_bar(stages: &[Stage], compact: bool) -> String {
+/// on hover and to screen readers; `details` adds each stage's payload
+/// details (a claim's rig, a cut's formula).
+fn stage_bar(stages: &[Stage], compact: bool, details: bool) -> String {
     let mut out = format!(
         "<ol class=\"stages{}\">",
         if compact { " compact" } else { "" }
@@ -45,7 +48,22 @@ fn stage_bar(stages: &[Stage], compact: bool) -> String {
             continue;
         }
         let at = stage.at.as_deref().map(when).unwrap_or_default();
-        let facts: String = stage.facts.iter().map(fact).collect();
+        let mut facts: String = stage.facts.iter().map(fact).collect();
+        if details && !stage.details.is_empty() {
+            let text: Vec<String> = stage
+                .details
+                .iter()
+                .map(|(key, value)| {
+                    format!("{} {}", escape(&super::fmt::words(key)), escape(value))
+                })
+                .collect();
+            write!(
+                facts,
+                "<small class=\"stage-detail\">{}</small>",
+                text.join(" · ")
+            )
+            .unwrap();
+        }
         write!(out, "<li class=\"stage {class}\"><span class=\"dot\" aria-hidden=\"true\"></span><strong>{}</strong><span class=\"sr-only\"> ({words})</span>{at}{facts}</li>", stage.label).unwrap();
     }
     out.push_str("</ol>");
@@ -68,7 +86,7 @@ fn now_line(p: &Progress, now: chrono::DateTime<chrono::Utc>) -> Option<String> 
     })
 }
 
-fn kind_words(kind: &str) -> String {
+pub(super) fn kind_words(kind: &str) -> String {
     match kind {
         "suspend" => "Suspended".into(),
         "resume" => "Resumed".into(),
@@ -106,7 +124,7 @@ pub(crate) fn compact(
     }
     let p = Progress::new(bead, &trail.events);
     let line = now_line(&p, now).unwrap_or_default();
-    Some((stage_bar(&p.stages, true), escape(&line)))
+    Some((stage_bar(&p.stages, true, false), escape(&line)))
 }
 
 pub(crate) fn progress_section(view: &View, bead: &Bead) -> String {
@@ -152,7 +170,8 @@ pub(crate) fn progress_section(view: &View, bead: &Bead) -> String {
         )
         .unwrap();
     }
-    out.push_str(&stage_bar(&p.stages, false));
+    let enriched = super::bead::enriched(view);
+    out.push_str(&stage_bar(&p.stages, false, enriched));
     if let Some(line) = now_line(&p, now) {
         write!(out, "<p class=\"now\">{}</p>", escape(&line)).unwrap();
     }
@@ -183,11 +202,14 @@ pub(crate) fn progress_section(view: &View, bead: &Bead) -> String {
                 out,
                 "<li><strong>Attempt {}</strong>{}<small>{ending}</small></li>",
                 attempt.number,
-                stage_bar(&attempt.stages, true)
+                stage_bar(&attempt.stages, true, false)
             )
             .unwrap();
         }
         out.push_str("</ul></details>");
+    }
+    if enriched {
+        out.push_str(&attempts(view, bead, &p));
     }
     write!(out, "<details id=\"provenance-log\"><summary>Provenance log · {} events</summary><div class=\"table-wrap\"><table class=\"log\"><thead><tr><th>When</th><th>Kind</th><th>Reference</th><th>Detail</th><th>By</th></tr></thead><tbody>", trail.events.len()).unwrap();
     for event in &trail.events {
@@ -207,6 +229,251 @@ pub(crate) fn progress_section(view: &View, bead: &Bead) -> String {
     }
     out.push_str("</tbody></table></div></details></section>");
     out
+}
+
+/// What an attempt used, as facts; nothing recorded is said plainly, never
+/// shown as zero.
+fn usage(u: &Usage) -> String {
+    if u.events == 0 {
+        return "<p class=\"muted\">No usage recorded.</p>".into();
+    }
+    let mut out = format!(
+        "<dl class=\"facts usage\"><dt>Cost</dt><dd>{}</dd><dt>Tokens</dt><dd title=\"{}\">{}</dd><dt>Wall time</dt><dd>{}</dd>",
+        escape(&money(u.dollars)),
+        count(u.tokens),
+        escape(&tokens(u.tokens)),
+        escape(&seconds(u.wall_seconds as f64))
+    );
+    if u.gate_runs > 0 || u.gate_seconds > 0 {
+        write!(
+            out,
+            "<dt>Gates</dt><dd>{} {} · {}</dd>",
+            u.gate_runs,
+            if u.gate_runs == 1 { "run" } else { "runs" },
+            escape(&seconds(u.gate_seconds as f64))
+        )
+        .unwrap();
+    }
+    if u.gate_reused > 0 || u.gate_saved_seconds > 0 {
+        write!(
+            out,
+            "<dt>Gates reused</dt><dd>{} · saved {}</dd>",
+            u.gate_reused,
+            escape(&seconds(u.gate_saved_seconds as f64))
+        )
+        .unwrap();
+    }
+    out.push_str("</dl>");
+    out
+}
+
+/// The run-feed side of one attempt: a link to the attempt on its run's
+/// page, its state, the feed's cost for it, its facts and a strip of its
+/// steps.
+fn feed_attempt(view: &View, bead: &Bead, id: &str) -> String {
+    let runs = joined(view, bead);
+    let run = view.run_for_attempt(id).map(|r| r.run.clone()).or_else(|| {
+        runs.iter().find_map(|r| match &r.doc {
+            Fetch::Ready(doc) if doc.attempts.iter().any(|a| a.id == id) => {
+                Some(r.summary.run.clone())
+            }
+            _ => None,
+        })
+    });
+    let Some(run) = run else {
+        return String::new();
+    };
+    let doc = match view.run_cache.get_run(&run) {
+        Fetch::Ready(doc) => doc,
+        Fetch::Pending => {
+            return format!(
+                "<p class=\"feed-join\">Run feed: {} <small>its details have not been read yet</small></p>",
+                run_link(&run, &run)
+            );
+        }
+        Fetch::Failed(error) => {
+            return format!(
+                "<p class=\"feed-join\">Run feed: {} <small>its details could not be read: {}</small></p>",
+                run_link(&run, &run),
+                escape(&error)
+            );
+        }
+    };
+    let Some(attempt) = doc.attempts.iter().find(|a| a.id == id) else {
+        return format!(
+            "<p class=\"feed-join\">Run feed: {} <small>does not list this attempt</small></p>",
+            run_link(&run, &run)
+        );
+    };
+    let mut out = format!(
+        "<p class=\"feed-join\">Run feed: <a href=\"/run/{}#attempt-{n}\">{} · attempt {n}</a> {}",
+        url(&run),
+        escape(&run),
+        tone_badge(&words(&attempt.state), runs::run_tone(&attempt.state)),
+        n = attempt.number
+    );
+    if let Some(usd) = attempt.costs.as_ref().and_then(|c| c.usd) {
+        write!(out, " <small>feed cost {}</small>", escape(&money(usd))).unwrap();
+    }
+    out.push_str("</p>");
+    if !attempt.facts.is_empty() {
+        out.push_str("<dl class=\"facts feed-facts\">");
+        for f in &attempt.facts {
+            write!(
+                out,
+                "<dt>{}</dt><dd>{}</dd>",
+                escape(&feed_label(view, f)),
+                feed_value(f)
+            )
+            .unwrap();
+        }
+        out.push_str("</dl>");
+    }
+    if !attempt.steps.is_empty() {
+        out.push_str("<ol class=\"step-strip\" aria-label=\"Steps\">");
+        for step in &attempt.steps {
+            let result = step.result.as_deref().unwrap_or(&step.state);
+            write!(
+                out,
+                "<li title=\"{}\">{}</li>",
+                escape(&format!("{} · {}", step.kind, result)),
+                tone_badge(&words(&step.kind), runs::step_tone(result))
+            )
+            .unwrap();
+        }
+        out.push_str("</ol>");
+    }
+    out
+}
+
+/// Every attempt, oldest first: its id, what it used (from provenance),
+/// and the run feed's view of it when an attempt there has the same id.
+fn attempts(view: &View, bead: &Bead, p: &Progress) -> String {
+    let mut rows: Vec<(usize, Option<&str>, &Usage, String)> = p
+        .earlier
+        .iter()
+        .map(|a| {
+            let ending = match &a.stop {
+                Some(stop) if stop.resumed.is_some() => "stopped, then resumed".to_string(),
+                Some(stop) => kind_words(&stop.stop.kind).to_lowercase(),
+                None => "ended".to_string(),
+            };
+            (a.number, a.id.as_deref(), &a.usage, ending)
+        })
+        .collect();
+    if p.attempt.is_some() || p.current_usage.events > 0 {
+        let state = if p.held.is_some() {
+            "held here"
+        } else if bead.is_closed() {
+            "closed the bead"
+        } else {
+            "current"
+        };
+        rows.push((
+            p.earlier.len() + 1,
+            p.attempt.as_deref(),
+            &p.current_usage,
+            state.to_string(),
+        ));
+    }
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut out = format!(
+        "<h3>Attempts · {}</h3><ol class=\"attempt-cards\">",
+        rows.len()
+    );
+    for (number, id, used, state) in rows {
+        write!(
+            out,
+            "<li id=\"attempt-{number}\"><p class=\"attempt-head\"><strong>Attempt {number}</strong>"
+        )
+        .unwrap();
+        if let Some(id) = id {
+            write!(out, " <code>{}</code>", escape(id)).unwrap();
+        }
+        write!(out, " <small>{}</small></p>", escape(&state)).unwrap();
+        out.push_str(&usage(used));
+        if let Some(id) = id {
+            out.push_str(&feed_attempt(view, bead, id));
+        }
+        out.push_str("</li>");
+    }
+    out.push_str("</ol>");
+    out
+}
+
+/// What the bead's work cost, from each source on its own: the provenance
+/// log's `used` events and the run feed's figure for the runs joined to it.
+/// The two are never added together.
+pub(crate) fn cost_section(view: &View, bead: &Bead) -> String {
+    if !super::bead::enriched(view) {
+        return String::new();
+    }
+    let mut out = String::new();
+    match view.trail(&bead.id) {
+        Some(trail) if !trail.events.is_empty() => {
+            let p = Progress::new(bead, &trail.events);
+            let total = p.usage();
+            if total.events == 0 {
+                out.push_str("<dt>Ledger usage</dt><dd><span class=\"muted\">No usage recorded</span> <small>Source: the provenance log has no <code>used</code> events.</small></dd>");
+            } else {
+                let attempts = p.earlier.iter().filter(|a| a.usage.events > 0).count()
+                    + usize::from(p.current_usage.events > 0);
+                write!(
+                    out,
+                    "<dt>Ledger usage</dt><dd><strong>{}</strong> · {} tokens · {} wall <small>Source: the provenance log's <code>used</code> events, summed over {attempts} {}.</small></dd>",
+                    escape(&money(total.dollars)),
+                    escape(&tokens(total.tokens)),
+                    escape(&seconds(total.wall_seconds as f64)),
+                    if attempts == 1 { "attempt" } else { "attempts" }
+                )
+                .unwrap();
+            }
+        }
+        Some(_) => {}
+        None if view.provenance.is_some() => out.push_str(
+            "<dt>Ledger usage</dt><dd><span class=\"muted\">Provenance not read yet</span></dd>",
+        ),
+        None => {}
+    }
+    let runs = view.runs_for(bead);
+    let known: Vec<_> = runs
+        .iter()
+        .filter_map(|r| r.cost_usd.map(|c| (r, c)))
+        .collect();
+    if !known.is_empty() {
+        let total: f64 = known.iter().map(|(_, c)| c).sum();
+        let partial = known.iter().any(|(r, _)| {
+            matches!(view.run_cache.get_run(&r.run), Fetch::Ready(doc) if doc.costs.as_ref().is_some_and(|c| !c.complete))
+        });
+        let each: Vec<String> = known
+            .iter()
+            .map(|(r, c)| format!("{} {}", run_link(&r.run, &r.run), escape(&money(*c))))
+            .collect();
+        let unknown = runs.len() - known.len();
+        write!(
+            out,
+            "<dt>Run feed</dt><dd><strong>{}{}</strong> <small>Source: the run feed's cost for {} joined {} ({}){}.</small></dd>",
+            if partial { "at least " } else { "" },
+            escape(&money(total)),
+            known.len(),
+            if known.len() == 1 { "run" } else { "runs" },
+            each.join(", "),
+            if unknown > 0 {
+                format!("; {unknown} more without a cost")
+            } else {
+                String::new()
+            }
+        )
+        .unwrap();
+    }
+    if out.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<section id=\"cost\"><h2>Cost</h2><dl class=\"facts cost-sources\">{out}</dl><p class=\"muted\">Each figure comes from its own source; they are never added together.</p></section>"
+    )
 }
 
 #[cfg(test)]
@@ -276,5 +543,53 @@ mod tests {
         assert!(page.contains("Earlier attempts · 1"));
         assert!(page.contains("Resumed <time"));
         assert!(page.contains("Claimed 2 times"));
+    }
+
+    #[test]
+    fn attempts_show_ids_usage_and_the_feed_attempt_they_join() {
+        let page = bead(&crate::testing::work_view(), "wk-2").unwrap();
+        assert!(page.contains("<h3>Attempts · 2</h3>"), "{page}");
+        assert!(page.contains("<strong>Attempt 1</strong> <code>att-0002-1</code>"));
+        assert!(page.contains("<strong>Attempt 2</strong> <code>att-0002-2</code>"));
+        assert!(page.contains("<dt>Cost</dt><dd>$2.10</dd>"));
+        assert!(page.contains("<dt>Cost</dt><dd>$3.27</dd>"));
+        assert!(page.contains("<dt>Gates reused</dt><dd>1 · saved 5m 0s</dd>"));
+        assert!(page.contains("href=\"/run/run%2D0002#attempt-1\""));
+        assert!(page.contains("href=\"/run/run%2D0002#attempt-2\""));
+        assert!(page.contains("<dt>Retried because</dt><dd>gate-failed</dd>"));
+        assert!(
+            page.contains("<span class=\"badge bad\">gate</span>"),
+            "failed gate step"
+        );
+        assert!(page.contains("<small class=\"stage-detail\">rig rigA · generation 2</small>"));
+        assert!(page.contains("<small class=\"stage-detail\">formula build</small>"));
+    }
+
+    #[test]
+    fn cost_sources_are_labelled_and_never_added() {
+        let view = crate::testing::work_view();
+        let page = bead(&view, "wk-2").unwrap();
+        let cost = &page[page.find("<section id=\"cost\">").expect("a cost section")..];
+        let cost = &cost[..cost.find("</section>").unwrap()];
+        // Provenance: 2.10 + 3.27; feed: run-0002 5.37 + run-0004 0.64.
+        assert!(
+            cost.contains("<dt>Ledger usage</dt><dd><strong>$5.37</strong>"),
+            "{cost}"
+        );
+        assert!(cost.contains("Source: the provenance log's <code>used</code> events"));
+        assert!(
+            cost.contains("<dt>Run feed</dt><dd><strong>$6.01</strong>"),
+            "{cost}"
+        );
+        assert!(cost.contains("Source: the run feed's cost for 2 joined runs"));
+        assert!(!cost.contains("$11.38"), "the sources are never summed");
+        // A run doc whose costs are incomplete makes the feed figure a floor.
+        let held = bead(&view, "wk-3").unwrap();
+        assert!(held.contains("<strong>at least $0.88</strong>"), "{held}");
+        // No profile and no run feed: no cost section.
+        let mut plain = view.clone();
+        plain.profile = std::sync::Arc::new(crate::profile::Profile::default());
+        plain.runs = None;
+        assert!(!bead(&plain, "wk-2").unwrap().contains("id=\"cost\""));
     }
 }

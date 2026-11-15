@@ -594,10 +594,6 @@ impl Progress {
     }
 
     /// Usage over every attempt, earlier ones included.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "WP2 and WP6 total it (BKLG-20261115-4e2r)")
-    )]
     pub fn usage(&self) -> Usage {
         let mut total = self.current_usage;
         for attempt in &self.earlier {

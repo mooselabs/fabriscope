@@ -3,16 +3,134 @@
 //! One bead's page.
 
 use super::fmt::words;
+use super::groups::members_table;
 use super::layout::page;
 use super::markdown::{Links, markdown};
-use super::panels::{banner, panels};
-use super::progress::progress_section;
+use super::panels::{banner, panels, receipts_section, runs_section};
+use super::progress::{cost_section, progress_section};
 use super::table::bead_table;
 use super::timeline::timeline;
-use super::{badge, bead_link, escape, heading, scroll_link};
+use super::{
+    badge, bead_link, escape, group_link, heading, person_link, scroll_link, state_badges,
+};
 use crate::beads::Bead;
 use crate::model::View;
+use crate::profile::{Profile, Source};
 use std::fmt::Write;
+
+/// Whether the page shows more than Beads itself stores: a profile is in
+/// use (`--parent-key` alone does not count) or a run feed is read. Without
+/// either the page is exactly what it was before profiles.
+pub(crate) fn enriched(view: &View) -> bool {
+    if view.runs.is_some() {
+        return true;
+    }
+    let profile = &*view.profile;
+    let generic = Profile {
+        parent: profile.parent.clone(),
+        ..Profile::default()
+    };
+    *profile != generic
+}
+
+/// The profile's view of the bead in its header: kind, derived states,
+/// group values and who holds each role.
+fn profile_meta(view: &View, bead: &Bead) -> (String, String) {
+    let Some(row) = view.facts(&bead.id) else {
+        return Default::default();
+    };
+    let mut before = String::new();
+    if let Some(kind) = row.kind.as_deref().and_then(|k| view.profile.kind(k)) {
+        write!(
+            before,
+            "<span class=\"kind\">{}</span>",
+            escape(&kind.label)
+        )
+        .unwrap();
+    }
+    before.push_str(&state_badges(view, row));
+    let mut after = String::new();
+    for group in &view.profile.groups {
+        let Some(values) = row.groups.get(&group.key) else {
+            continue;
+        };
+        let lane = row
+            .subgroups
+            .get(&group.key)
+            .map(|l| format!(" · {}", escape(l)))
+            .unwrap_or_default();
+        let links: Vec<String> = values
+            .iter()
+            .map(|v| group_link(&group.key, v, v))
+            .collect();
+        write!(
+            after,
+            "<span class=\"chip\">{} {}{lane}</span>",
+            escape(&group.label),
+            links.join(", ")
+        )
+        .unwrap();
+    }
+    for role in &view.profile.people.roles {
+        if let Some(name) = view.person_in_role(&bead.id, &role.key) {
+            write!(
+                after,
+                "<span class=\"role\">{} {}</span>",
+                escape(&role.label),
+                person_link(&name)
+            )
+            .unwrap();
+        }
+    }
+    (before, after)
+}
+
+/// Whether a state the bead is in says it is never ready.
+fn ready_overridden(view: &View, bead: &Bead) -> bool {
+    view.facts(&bead.id).is_some_and(|row| {
+        row.states
+            .iter()
+            .filter_map(|k| view.profile.state(k))
+            .any(|s| s.overrides_ready)
+    })
+}
+
+/// The members of each group whose value this bead is (a milestone a
+/// `ref:` or `declared` group names, say), as that group's members table.
+fn group_members(view: &View, bead: &Bead) -> String {
+    let Some(index) = view.group_index() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    for group in &view.profile.groups {
+        let names_beads =
+            group.declared.is_some() || group.from.iter().any(|s| matches!(s, Source::Ref(_)));
+        if !names_beads {
+            continue;
+        }
+        let Some(values) = index.get(&group.key) else {
+            continue;
+        };
+        for key in [&bead.external_ref, &bead.id] {
+            let Some(members) = values.get(key.as_str()).filter(|_| !key.is_empty()) else {
+                continue;
+            };
+            write!(
+                out,
+                "<section class=\"group-members\" id=\"members-{}\"><h2>{} {} · {}</h2><p>{}</p>{}</section>",
+                super::url(&group.key),
+                escape(&group.label),
+                escape(key),
+                members.len(),
+                group_link(&group.key, key, &format!("Open the {} page", group.label.to_lowercase())),
+                members_table(view, &group.key, key)
+            )
+            .unwrap();
+            break;
+        }
+    }
+    out
+}
 
 fn bead_relations(title: &str, rows: &[(&Bead, String)]) -> String {
     let mut out = format!("<h3>{}</h3>", escape(title));
@@ -55,27 +173,33 @@ pub fn bead(view: &View, id: &str) -> Option<String> {
         format!("{} · {}", bead.id, bead.external_ref)
     };
     body.push_str(&heading(&eyebrow, &bead.title, ""));
+    let (kind_states, groups_people) = profile_meta(view, bead);
     write!(
         body,
-        "<div class=\"record-meta\">{}<span>P{}</span><span>{}</span>",
+        "<div class=\"record-meta\">{kind_states}{}<span>P{}</span><span>{}</span>",
         badge(&bead.status),
         bead.priority,
         escape(&bead.issue_type)
     )
     .unwrap();
-    if bead.ready {
+    if bead.ready && !ready_overridden(view, bead) {
         body.push_str("<span>Ready, as bd ready decides</span>");
     }
     if !bead.assignee.is_empty() {
         write!(body, "<span>Assigned to {}</span>", escape(&bead.assignee)).unwrap();
     }
+    body.push_str(&groups_people);
     for label in &bead.labels {
         write!(body, "<span class=\"label\">{}</span>", escape(label)).unwrap();
     }
     body.push_str("</div>");
     body.push_str(&banner(view, bead));
     body.push_str(&progress_section(view, bead));
+    body.push_str(&cost_section(view, bead));
     body.push_str(&panels(view, bead));
+    body.push_str(&runs_section(view, bead));
+    body.push_str(&receipts_section(view, bead));
+    body.push_str(&group_members(view, bead));
     body.push_str(&timeline(view, bead));
     let children = s.children(&bead.id);
     if !children.is_empty() {
