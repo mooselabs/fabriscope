@@ -53,7 +53,12 @@ fn held_costs_and_receipts_on_the_work_fixture() {
         let h: serde_json::Value = serde_json::from_str(h).unwrap_or_default();
         status == 200 && h["provenance"]["read"].as_u64().unwrap_or(0) >= 2
     });
-    let held = page_until(&server, "/held", |p| p.contains("<code>att-0003-1</code>"));
+    // The feed client fetches held items' run docs ahead, so /held, which
+    // never fetches, shows the run's stop without anyone opening it.
+    let held = page_until(&server, "/held", |p| {
+        p.contains("<code>att-0003-1</code>")
+            && p.contains("The change needs a file outside its write scope")
+    });
     assert!(held.contains("Move reports to the new table"), "{held}");
     assert!(
         held.contains("id=\"held-held-scope%2Dexceeded\""),
@@ -61,11 +66,6 @@ fn held_costs_and_receipts_on_the_work_fixture() {
     );
     assert!(held.contains("since <time datetime=\"2026-11-15T09:15:00Z\""));
     assert!(held.contains("href=\"/run/run%2D0003\""));
-    assert!(
-        held.contains("The change needs a file outside its write scope")
-            || (held.contains("stop scope-exceeded") && held.contains("not read yet")),
-        "run-0003's stop, or its code until the run doc is read: {held}"
-    );
     let by_cause = get(&server, "/held?by=work.suspended.cause").1;
     assert!(
         by_cause.contains("id=\"held-held-scope\""),

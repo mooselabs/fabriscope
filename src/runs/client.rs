@@ -38,6 +38,11 @@ const POLL: Duration = Duration::from_secs(30);
 /// How long one HTTP read may take.
 const TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Held items whose run docs are fetched ahead, and how many of each
+/// one's newest runs.
+const HELD_ITEMS: usize = 50;
+const HELD_RUNS: usize = 2;
+
 /// The largest feed file read, over HTTP or from disk. The spec keeps pages
 /// under 512 KiB and run docs under 1 MiB; an index can be larger.
 pub(crate) const MAX_BYTES: usize = 32 << 20;
@@ -85,6 +90,25 @@ fn install(app: &App, cache: &Arc<super::cache::Cache>, source: &Source, view: &
     );
     if let Some(index) = view.run_index() {
         cache.index(index);
+    }
+    warm_held(view, cache);
+}
+
+/// Starts fetching the newest run docs of each held item (one in a
+/// `read_ahead` state), so `/held`, which only peeks at the cache, can show
+/// why a run stopped without anyone opening the run first. Bounded: at
+/// most `HELD_RUNS` runs of `HELD_ITEMS` items.
+fn warm_held(view: &model::View, cache: &super::cache::Cache) {
+    let Some(s) = view.snapshot() else {
+        return;
+    };
+    for id in crate::filters::read_ahead(s, &view.profile, HELD_ITEMS) {
+        let Some(bead) = s.find(&id) else {
+            continue;
+        };
+        for run in view.runs_for(bead).into_iter().take(HELD_RUNS) {
+            let _ = cache.get_run(&run.run);
+        }
     }
 }
 
@@ -201,9 +225,11 @@ async fn apply(app: &App, cache: &super::cache::Cache, result: Result<Option<Ind
     let Some(feed) = view.runs.as_mut() else {
         return;
     };
+    let mut warm = false;
     let changed = match result {
         Ok(Some(index)) => {
             cache.index(&index);
+            warm = true;
             let held = cache.ready_runs();
             let index = index.with_attempts(held.iter().map(|r| &**r));
             *feed = model::Feed {
@@ -220,6 +246,9 @@ async fn apply(app: &App, cache: &super::cache::Cache, result: Result<Option<Ind
             changed
         }
     };
+    if warm {
+        warm_held(&view, cache);
+    }
     if changed {
         view.revision += 1;
         app.updates.send_replace(view.revision);

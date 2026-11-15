@@ -487,10 +487,12 @@ pub fn provenance_attempts(view: &View) -> Vec<ProvAttempt> {
     out
 }
 
-/// Every run of the feed with its reported cost. Run docs are looked up
-/// (never waited for) only for runs whose time is in `range`, so a page
-/// asks for no more docs than it shows; `attempts` adds the run every
-/// provenance attempt id joins through `View::run_for_attempt`.
+/// Every run of the feed with its reported cost. For runs whose time is in
+/// `range`, a run doc already held (`Cache::peek_run`; never fetched here,
+/// so a wide range cannot read the whole feed) adds its attempt ids, model
+/// split and completeness; `attempts` adds the run every provenance attempt
+/// id joins through `View::run_for_attempt`. A run whose doc is not held
+/// joins its unnamed attempts by time window (see the module comment).
 pub fn feed_runs(
     view: &View,
     attempts: &[ProvAttempt],
@@ -544,7 +546,7 @@ pub fn feed_runs(
             };
             let wanted = unbounded || run.at.as_deref().is_some_and(|a| range.contains(a, now));
             if wanted {
-                if let Fetch::Ready(doc) = view.run_cache.get_run(&summary.run) {
+                if let Fetch::Ready(doc) = view.run_cache.peek_run(&summary.run) {
                     for attempt in &doc.attempts {
                         if !attempt.id.is_empty() && !run.attempt_ids.contains(&attempt.id) {
                             run.attempt_ids.push(attempt.id.clone());

@@ -98,7 +98,7 @@ fn join<'a>(view: &'a View, bead: &Bead, state: &StateRule) -> Joined<'a> {
 /// The run's stop, from its doc when read: the attempt's own stop, else
 /// the run's.
 fn run_stop(view: &View, run: &RunSummary, attempt: Option<&str>) -> Result<Option<Stop>, String> {
-    match view.run_cache.get_run(&run.run) {
+    match view.run_cache.peek_run(&run.run) {
         Fetch::Ready(doc) => Ok(attempt
             .and_then(|a| doc.attempts.iter().find(|x| x.id == a))
             .and_then(|a| a.stop.clone())

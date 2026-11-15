@@ -16,7 +16,8 @@
 //!   pages (64 MiB) are kept, the least recently read going first.
 //!
 //! Without a reader (unit tests, or no `--runs`), a miss stays `Pending`
-//! until something calls `put_*`.
+//! until something calls `put_*`. `peek_run` answers from what is held and
+//! never fetches.
 
 use super::{Board, Index, Run, doc_readable};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -198,6 +199,19 @@ impl Cache {
             self.start(&mut inner, Key::Run(run.to_string()));
         }
         answer
+    }
+
+    /// The run doc for `run` if it is already held, never starting a fetch
+    /// and never counting as a read for eviction. Aggregate pages (`/costs`,
+    /// `/held`) use it: they touch every run in a range, and fetching each
+    /// would read the whole feed and evict the docs bead and run pages
+    /// asked for. `Pending` when it is not held.
+    pub fn peek_run(&self, run: &str) -> Fetch<Arc<Run>> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .runs
+            .get(run)
+            .map_or(Fetch::Pending, |slot| slot.fetch.clone())
     }
 
     /// Page `page` (0-based) of document `doc` of `run`, as text, without
@@ -645,5 +659,25 @@ mod tests {
         let _ = cache.get_run("r1");
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_peek_never_fetches_and_never_counts_as_a_read() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let cache = Arc::new(Cache::with_limits(1, 10));
+        let r = reads.clone();
+        cache.install(
+            move |_| {
+                r.fetch_add(1, Ordering::SeqCst);
+                Err("down".into())
+            },
+            |_| {},
+        );
+        cache.index(&index("one"));
+        assert_eq!(cache.peek_run("r1"), Fetch::Pending);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(reads.load(Ordering::SeqCst), 0, "a peek starts no fetch");
+        cache.put_run("r1", Ok(Run::default()));
+        assert!(matches!(cache.peek_run("r1"), Fetch::Ready(_)));
     }
 }

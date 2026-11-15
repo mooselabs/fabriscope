@@ -93,29 +93,21 @@ fn a_held_bead_shows_its_banner_and_the_feed_stop() {
         "bd ready lists it, but a held bead is never ready"
     );
     assert!(held.contains("href=\"/run/run%2D0003\""));
-    // The stop's details live in the run doc, read in the background.
-    match page_when(&server, "/bead/wk-3", 10, |p| p.contains("id=\"stop\"")) {
-        Some(stop) => {
-            assert!(
-                stop.contains("<strong>Next:</strong> Widen the write scope"),
-                "{stop}"
-            );
-            assert!(stop.contains(
-                "<li><code>workctl edit WORK-0003 --add-scope &quot;migrations/**&quot;</code></li>"
-            ));
-            assert!(stop.contains("<li><code>workctl release WORK-0003</code></li>"));
-            assert!(stop.contains("<dt>Question</dt><dd>Widen WORK-0003&#39;s write scope"));
-            assert!(stop.contains("<dt>Recommended</dt><dd>yes</dd>"));
-            assert!(stop.contains("<dt>If yes</dt><dd>The run resumes"));
-            assert!(stop.contains("<dt>If not</dt><dd>A new item is cut"));
-        }
-        None => {
-            eprintln!("run-0003's doc was not read by the server; checking the pending form");
-            assert!(held.contains(
-                "stopped with <code>scope-exceeded</code>. Its details have not been read yet."
-            ));
-        }
-    }
+    // The stop's details live in the run doc, which the page's own visit
+    // fetches in the background; until then the page says so.
+    let stop = page(&server, "/bead/wk-3", |p| p.contains("id=\"stop\""));
+    assert!(
+        stop.contains("<strong>Next:</strong> Widen the write scope"),
+        "{stop}"
+    );
+    assert!(stop.contains(
+        "<li><code>workctl edit WORK-0003 --add-scope &quot;migrations/**&quot;</code></li>"
+    ));
+    assert!(stop.contains("<li><code>workctl release WORK-0003</code></li>"));
+    assert!(stop.contains("<dt>Question</dt><dd>Widen WORK-0003&#39;s write scope"));
+    assert!(stop.contains("<dt>Recommended</dt><dd>yes</dd>"));
+    assert!(stop.contains("<dt>If yes</dt><dd>The run resumes"));
+    assert!(stop.contains("<dt>If not</dt><dd>A new item is cut"));
 }
 
 #[test]
@@ -153,13 +145,12 @@ fn a_landed_bead_joins_attempts_runs_receipts_and_costs() {
         "the two sources are never added"
     );
     // Once run-0002's doc is read, attempt 1 links to its place on the run page.
-    if let Some(joined) = page_when(&server, "/bead/wk-2", 10, |p| p.contains("#attempt-1\"")) {
-        assert!(
-            joined.contains("href=\"/run/run%2D0002#attempt-1\""),
-            "{joined}"
-        );
-        assert!(joined.contains("<dt>Retried because</dt><dd>gate-failed</dd>"));
-    }
+    let joined = page(&server, "/bead/wk-2", |p| p.contains("#attempt-1\""));
+    assert!(
+        joined.contains("href=\"/run/run%2D0002#attempt-1\""),
+        "{joined}"
+    );
+    assert!(joined.contains("<dt>Retried because</dt><dd>gate-failed</dd>"));
     // A milestone lists the group members it names.
     let milestone = page(&server, "/bead/wk-m1", |p| p.contains("Milestone"));
     assert!(
@@ -202,14 +193,13 @@ fn the_timeline_merges_dates_history_comments_and_provenance() {
     );
     assert!(p.contains("href=\"/person/factory%2FhostA%2FrigA\""));
     // Steps join once run-0001's doc is read.
-    if let Some(steps) = page_when(&server, "/bead/wk-1", 10, |p| {
+    let steps = page(&server, "/bead/wk-1", |p| {
         p.contains("id=\"t-step-run-0001-")
-    }) {
-        assert!(
-            position(&steps, "id=\"t-step-run-0001-s-0001-gate-1\"")
-                < position(&steps, "id=\"t-comment-c-1c\"")
-        );
-    }
+    });
+    assert!(
+        position(&steps, "id=\"t-step-run-0001-s-0001-gate-1\"")
+            < position(&steps, "id=\"t-comment-c-1c\"")
+    );
     // Panels: every kind, and a field with no value is left out.
     assert!(p.contains("<dt>Timebox</dt><dd>2–3 h</dd>"));
     assert!(p.contains("<dt>Spend cap</dt><dd>$4.50</dd>"));
