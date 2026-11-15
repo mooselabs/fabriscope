@@ -1,4 +1,4 @@
-use crate::{beads, scrolls};
+use crate::{beads, provenance, scrolls};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -17,6 +17,8 @@ pub struct View {
     pub beads: Option<Feed<beads::Snapshot>>,
     pub scrolls: Option<Feed<scrolls::Snapshot>>,
     pub scrolls_checked_at: Option<String>,
+    /// Provenance logs read so far, when a local `bd` can read them.
+    pub provenance: Option<provenance::Store>,
     /// Bumped on changed content or health; open pages reload when it changes.
     pub revision: u64,
 }

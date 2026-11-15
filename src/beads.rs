@@ -362,14 +362,19 @@ impl Reader {
         }
     }
 
+    /// The local `bd`, when there is one: it answers what `bd serve` does
+    /// not serve, such as the commit and provenance logs.
+    pub fn local(&self) -> Option<&Tool> {
+        match self {
+            Reader::Api { local, .. } => local.as_ref(),
+            Reader::Cli(tool) => Some(tool),
+        }
+    }
+
     /// A change signal, and whether it is reliable (a commit) or only a hint
     /// (API stats), in which case the caller also re-reads on a timer.
     pub async fn probe(&self) -> Option<(String, bool)> {
-        let local = match self {
-            Reader::Api { local, .. } => local.as_ref(),
-            Reader::Cli(tool) => Some(tool),
-        };
-        if let Some(tool) = local {
+        if let Some(tool) = self.local() {
             if let Some(commit) = commit(tool).await {
                 return Some((commit, true));
             }

@@ -1,0 +1,10 @@
+[
+  {"id":"p1","issue_id":"demo-1","kind":"claim","actor":"factory/demo","payload":"{\"generation\":1}","source":"test","occurred_at":"2026-10-04T09:00:00Z","created_at":"2026-10-04T09:00:01Z"},
+  {"id":"p2","issue_id":"demo-1","kind":"cut","actor":"factory/demo","payload":"{\"formula\":\"build\"}","source":"test","occurred_at":"2026-10-04T09:02:00Z","created_at":"2026-10-04T09:02:00Z","ref":"demo:run-1@2026-10-04T09:00:00Z","ref_kind":"work-id"},
+  {"id":"p3","issue_id":"demo-1","kind":"suspend","actor":"factory/demo","payload":"{\"cause\":\"implementation\",\"stop_code\":\"tests_failed\"}","source":"test","occurred_at":"2026-10-04T10:00:00Z","created_at":"2026-10-04T10:00:00Z"},
+  {"id":"p4","issue_id":"demo-1","kind":"resume","actor":"owner","payload":"{\"why\":\"fixed the fixture\"}","source":"test","occurred_at":"2026-10-04T11:00:00Z","created_at":"2026-10-04T11:00:00Z"},
+  {"id":"p5","issue_id":"demo-1","kind":"claim","actor":"factory/demo","payload":"{\"generation\":1}","source":"test","occurred_at":"2026-10-04T12:00:00Z","created_at":"2026-10-04T12:00:00Z"},
+  {"id":"p6","issue_id":"demo-1","kind":"cut","actor":"factory/demo","payload":"{\"formula\":\"build\"}","source":"test","occurred_at":"2026-10-04T12:01:00Z","created_at":"2026-10-04T12:01:00Z","ref":"demo:run-2@2026-10-04T12:00:00Z","ref_kind":"work-id"},
+  {"id":"p7","issue_id":"demo-1","kind":"commit","actor":"factory/demo","payload":"{}","source":"test","occurred_at":"2026-10-04T12:40:00Z","created_at":"2026-10-04T12:40:00Z","ref":"0123456789abcdef0123456789abcdef01234567","ref_kind":"git-sha"},
+  {"id":"p8","issue_id":"demo-1","kind":"land","actor":"factory/demo","payload":"{}","source":"test","occurred_at":"2026-10-04T12:50:00Z","created_at":"2026-10-04T12:50:00Z","ref":"https://github.com/example/demo/pull/7","ref_kind":"pr"}
+]

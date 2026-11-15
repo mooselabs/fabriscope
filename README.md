@@ -99,7 +99,8 @@ running the version it started with. It prints
 
 ## What you see
 
-- **Overview** — open, ready, in-progress and waiting counts; open beads over
+- **Overview** — open, ready, in-progress and waiting counts; where each
+  bead in progress is up to (see **Progress** below); open beads over
   the last 28 complete UTC days; closed and added per period; what-if
   forecasts; the next ready beads grouped by parent; Scrolls kinds and the
   newest scrolls.
@@ -111,6 +112,22 @@ running the version it started with. It prints
   dependencies, not a status. Each bead page shows its description, design,
   acceptance criteria and notes as Markdown, what it depends on, what it
   blocks, related beads, and scrolls that reference it.
+- **Progress** — on each bead page, the stages its provenance log shows it
+  has reached, as a line of steps: **Created**, **Claimed** (`claim`),
+  **Started** (`cut`), **Committed** (`commit`), **Landed** (`land`) and
+  **Closed**, with **Used** (`used`) beside them. Each step shows when it
+  happened and what it points at: the claiming actor, the run, the commit
+  SHA and branch, the pull request. The next step is marked with how long it
+  has been due.
+  - Each `claim` starts an attempt; the line shows the latest. A `suspend`
+    marks the step the attempt stopped before, with the cause the event
+    records, and holds it there until a `resume`. After a `resume` or a
+    `handoff` the bead waits for a new claim, and the stopped attempt moves
+    to **Earlier attempts**.
+  - A step with no event although a later step has one shows as not
+    recorded, rather than guessed.
+  - The full log is under **Provenance log**. Beads in progress also show a
+    compact line of dots in lists and on the overview.
 - **Epics** — each epic with progress over its children: beads with a
   `parent-child` dependency on it, or, with `--parent-key`, beads whose
   metadata names it. Some stores avoid `parent-child` because Beads gives it
@@ -164,6 +181,19 @@ claims, or edits anything.
   - `bd serve` always offers write operations (claim, close, delete), and
     has no authentication on loopback unless you give it a token file.
     Fabriscope only ever sends reads.
+- **Provenance:** with `bd provenance log --json -- ID`, one bead at a time,
+  because `bd serve` does not serve provenance and `bd` has no bulk read. So
+  it needs a local `bd`: with `--beads-url` alone there is no **Progress**.
+  - Reads run in the background, at most four at once. A page never waits
+    for one: it shows the last read (or "Reading the provenance log…") and
+    updates itself when a read changes what it shows.
+  - Fabriscope reads a bead's log when its page is opened, and reads every
+    bead in progress ahead of time, after each Beads read. A log is read
+    again when the bead's `updated_at` changes, or after two minutes (thirty
+    for a closed bead, one after a failed read).
+  - Against a Dolt server across a network each `bd` call can take seconds
+    (about ten over Tailscale in one measurement), which is why none of
+    this is on the request path.
 - **Scrolls:** through `GET /v0/graph` on a loopback `scrolls serve`. The
   complete snapshot includes document bodies, fields, paths, aliases and all
   relationships, including Beads backlinks. Normal viewing creates no render
@@ -228,7 +258,9 @@ Content Security Policy.
 
 `GET /healthz` returns JSON with the running version, any newer version
 installed by the updater, and, for each store shown, when it was last read,
-its commit or Dolt revision, record counts and the last error.
+its commit or Dolt revision, record counts and the last error. With a local
+`bd`, `provenance` counts the logs read, the reads under way and the reads
+that failed.
 
 ## Development
 

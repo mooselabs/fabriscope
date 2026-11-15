@@ -2,6 +2,7 @@
 
 mod beads;
 mod model;
+mod provenance;
 mod render;
 mod scrolls;
 mod scrolls_http;
@@ -28,7 +29,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::{RwLock, watch};
+use tokio::sync::{RwLock, Semaphore, watch};
 use tokio_stream::{StreamExt, wrappers::WatchStream};
 use tools::Tool;
 
@@ -61,7 +62,19 @@ struct App {
     updates: watch::Sender<u64>,
     /// A newer release installed on disk by the background update check.
     installed: Arc<Mutex<Option<String>>>,
+    /// Reads provenance logs, when a local `bd` can.
+    provenance: Option<Arc<Reads>>,
 }
+
+/// The local `bd` and how many provenance reads may run at once. Each read
+/// is its own `bd` process, which can take seconds against a remote server.
+struct Reads {
+    tool: Tool,
+    permits: Semaphore,
+}
+
+/// Beads whose provenance is read ahead of any visit: the ones in progress.
+const AHEAD: usize = 100;
 
 impl App {
     fn new(view: View) -> Self {
@@ -70,6 +83,46 @@ impl App {
             view: Arc::new(RwLock::new(view)),
             updates,
             installed: Arc::default(),
+            provenance: None,
+        }
+    }
+
+    fn with_provenance(mut self, tool: Tool) -> Self {
+        self.provenance = Some(Arc::new(Reads {
+            tool,
+            permits: Semaphore::new(4),
+        }));
+        self
+    }
+
+    /// Starts a background read of each named bead's provenance log that is
+    /// missing or stale. Pages render the last read straight away; a read
+    /// that changes what they show bumps the revision, and they refresh.
+    async fn want_provenance(&self, ids: Vec<String>) {
+        let Some(reads) = &self.provenance else {
+            return;
+        };
+        let now = chrono::Utc::now();
+        let mut started = Vec::new();
+        {
+            let mut view = self.view.write().await;
+            let View {
+                beads, provenance, ..
+            } = &mut *view;
+            let (Some(feed), Some(store)) = (beads.as_ref(), provenance.as_mut()) else {
+                return;
+            };
+            for id in ids {
+                if let Some(bead) = feed.data.get(&id) {
+                    if store.wants_read(bead, now) {
+                        store.reading.insert(id.clone());
+                        started.push((id, bead.updated_at.clone()));
+                    }
+                }
+            }
+        }
+        for (id, updated_at) in started {
+            tokio::spawn(read_provenance(self.clone(), reads.clone(), id, updated_at));
         }
     }
 
@@ -79,6 +132,46 @@ impl App {
         view.revision += 1;
         self.updates.send_replace(view.revision);
     }
+}
+
+async fn read_provenance(app: App, reads: Arc<Reads>, id: String, updated_at: Option<String>) {
+    let result = match reads.permits.acquire().await {
+        // `--` ends bd's options, so no id is read as one.
+        Ok(_permit) => tools::run(
+            &reads.tool,
+            &["provenance", "log", "--json", "--", &id],
+            120,
+        )
+        .await
+        .and_then(|text| provenance::parse(&text)),
+        Err(_) => Err("provenance reads stopped".into()),
+    };
+    let mut view = app.view.write().await;
+    let Some(store) = view.provenance.as_mut() else {
+        return;
+    };
+    if store.record(&id, result, updated_at, chrono::Utc::now()) {
+        view.revision += 1;
+        app.updates.send_replace(view.revision);
+    }
+}
+
+/// The beads to read provenance for ahead of a visit: those in progress.
+fn in_progress(snapshot: &beads::Snapshot) -> Vec<String> {
+    snapshot
+        .ordered()
+        .filter(|b| b.status == "in_progress")
+        .take(AHEAD)
+        .map(|b| b.id.clone())
+        .collect()
+}
+
+async fn view_in_progress(app: &App) -> Vec<String> {
+    let view = app.view.read().await;
+    view.beads
+        .as_ref()
+        .map(|f| in_progress(&f.data))
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -247,6 +340,7 @@ async fn watch_beads(
         last = probe.map(|(signal, _)| signal);
         let result = beads::load(&reader, parent_key.as_deref()).await;
         refreshed = Instant::now();
+        let ahead = result.as_ref().map(in_progress).unwrap_or_default();
         app.update(|view| {
             if let Some(feed) = view.beads.as_mut() {
                 match result {
@@ -265,6 +359,7 @@ async fn watch_beads(
             }
         })
         .await;
+        app.want_provenance(ahead).await;
     }
 }
 
@@ -306,6 +401,7 @@ async fn refresh_scrolls(app: &App, api: &mut scrolls_http::Api) {
 }
 
 async fn overview(State(app): State<App>) -> Html<String> {
+    app.want_provenance(view_in_progress(&app).await).await;
     Html(render::overview(&*app.view.read().await))
 }
 
@@ -334,6 +430,7 @@ async fn scrolls_page(State(app): State<App>, Query(filter): Query<ScrollFilter>
 }
 
 async fn bead_page(State(app): State<App>, Path(id): Path<String>) -> Response {
+    app.want_provenance(vec![id.clone()]).await;
     let view = app.view.read().await;
     match render::bead(&view, &id) {
         Some(page) => Html(page).into_response(),
@@ -380,6 +477,13 @@ async fn health(State(app): State<App>) -> Response {
             "error": f.error,
         })
     });
+    let provenance = view.provenance.as_ref().map(|p| {
+        serde_json::json!({
+            "read": p.trails.len(),
+            "reading": p.reading.len(),
+            "failed": p.trails.values().filter(|t| t.error.is_some()).count(),
+        })
+    });
     let update = app
         .installed
         .lock()
@@ -393,6 +497,7 @@ async fn health(State(app): State<App>) -> Response {
             "update": update,
             "revision": view.revision,
             "beads": beads,
+            "provenance": provenance,
             "scrolls": scrolls,
         })),
     )
@@ -544,7 +649,9 @@ async fn run() -> Result<(), String> {
             .unwrap_or_default()
     );
     let scrolls_checked_at = scrolls.as_ref().map(|s| s.generated_at.clone());
-    let app = App::new(View {
+    let provenance_tool = beads_reader.as_ref().and_then(|r| r.local()).cloned();
+    let ahead = beads.as_ref().map(in_progress).unwrap_or_default();
+    let mut app = App::new(View {
         title,
         beads: beads.map(|data| Feed {
             data: Arc::new(data),
@@ -555,8 +662,14 @@ async fn run() -> Result<(), String> {
             error: None,
         }),
         scrolls_checked_at,
+        provenance: provenance_tool
+            .as_ref()
+            .map(|_| provenance::Store::default()),
         revision: 1,
     });
+    if let Some(tool) = provenance_tool {
+        app = app.with_provenance(tool);
+    }
     let bind = config
         .bind
         .unwrap_or_else(|| "127.0.0.1:8787".parse().unwrap());
@@ -571,6 +684,7 @@ async fn run() -> Result<(), String> {
     };
     let address = listener.local_addr().map_err(|e| e.to_string())?;
     println!("Fabriscope: http://{address}{summary}");
+    app.want_provenance(ahead).await;
     if let Some(reader) = beads_reader {
         tokio::spawn(watch_beads(
             app.clone(),
