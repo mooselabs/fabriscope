@@ -68,7 +68,10 @@ fields.
 tone?, ref?}`. A key is opaque to readers; producers MAY namespace keys with
 dots (`acme.gate_seconds`). A reader shows `label`, else a label it was
 configured with for that key, else the raw key. `type` tells a reader how to
-format the value; `tone` (`good`, `warn`, `bad`) how to colour it; `ref`
+format the value (`seconds` and `hours` are durations, `usd` dollars,
+`tokens` and `count` whole numbers, `percent` a percentage where `42.5`
+means 42.5%, `sha` and `tree` hashes, `timestamp` an RFC 3339 instant); a
+value that does not fit its type is shown as text; `tone` (`good`, `warn`, `bad`) how to colour it; `ref`
 makes it a link to another item, run, attempt, commit or tree.
 
 ## Files

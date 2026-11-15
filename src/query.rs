@@ -91,6 +91,21 @@ impl Facets {
         }
     }
 
+    /// The date range the query names, else the last `days` days; the flag
+    /// says whether it fell back to that default.
+    pub fn range_or(&self, days: u32) -> (Range, bool) {
+        let range = self.range();
+        if range == Range::default() {
+            let fallback = Range {
+                days: Some(days),
+                ..Range::default()
+            };
+            (fallback, true)
+        } else {
+            (range, false)
+        }
+    }
+
     /// The pairs `href` writes, in a fixed order, without `page` and
     /// without empty values.
     pub fn pairs(&self) -> Vec<(String, String)> {

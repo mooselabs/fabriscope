@@ -196,6 +196,28 @@ pub(crate) fn status_options<'a>(beads: impl Iterator<Item = &'a Bead>) -> Vec<(
     options
 }
 
+/// Words for a range at `now`: "today", "the last 7 days",
+/// "1 Nov 2026 to 15 Nov 2026", "since …", "up to …" or "all time".
+pub(crate) fn range_words(
+    range: &crate::query::Range,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    if let Some(days) = range.days {
+        return if days == 1 {
+            "today".into()
+        } else {
+            format!("the last {days} days")
+        };
+    }
+    let day = |d: chrono::NaiveDate| d.format("%-d %b %Y").to_string();
+    match range.bounds(now) {
+        (Some(from), Some(to)) => format!("{} to {}", day(from), day(to)),
+        (Some(from), None) => format!("since {}", day(from)),
+        (None, Some(to)) => format!("up to {}", day(to)),
+        (None, None) => "all time".into(),
+    }
+}
+
 /// A muted "unknown": what every page shows for a value nobody recorded,
 /// never 0.
 pub(crate) fn unknown() -> &'static str {
@@ -223,11 +245,25 @@ pub(crate) fn heading(eyebrow: &str, title: &str, description: &str) -> String {
     )
 }
 
-/// A row of metric cards: (label, value, detail, href).
+/// One metric card: a label, a value (markup), a detail line, and a link
+/// when the card opens a list.
+pub(crate) fn card(label: &str, value: &str, detail: &str, link: Option<String>) -> String {
+    let inner = format!(
+        "<span>{}</span><strong>{value}</strong><small>{}</small>",
+        escape(label),
+        escape(detail)
+    );
+    match link {
+        Some(href) => format!("<a class=\"metric\" href=\"{}\">{inner}</a>", escape(&href)),
+        None => format!("<div class=\"metric\">{inner}</div>"),
+    }
+}
+
+/// A row of linked metric cards: (label, value, detail, href).
 pub(crate) fn metrics(cards: &[(&str, usize, &str, String)]) -> String {
     let mut out = "<div class=\"metrics\">".to_string();
     for (label, value, detail, href) in cards {
-        write!(out, "<a class=\"metric\" href=\"{}\"><span>{}</span><strong>{value}</strong><small>{}</small></a>", escape(href), escape(label), escape(detail)).unwrap();
+        out.push_str(&card(label, &value.to_string(), detail, Some(href.clone())));
     }
     out.push_str("</div>");
     out
@@ -256,17 +292,26 @@ pub(crate) fn select(
     out
 }
 
-/// Previous/next links for page `current` of `pages`, carrying `query`.
+/// The page shown and the page count for `len` rows, `size` to a page,
+/// when the query asks for page `requested` (0-based; past the end shows
+/// the last page).
+pub(crate) fn page_of(len: usize, size: usize, requested: usize) -> (usize, usize) {
+    let pages = len.div_ceil(size).max(1);
+    (requested.min(pages - 1), pages)
+}
+
+/// Previous/next links for page `current` of `pages`, carrying `query`
+/// (`Facets::pairs`, say).
 pub(crate) fn pagination(
     path: &str,
-    query: &[(&str, &str)],
+    query: &[(impl AsRef<str>, impl AsRef<str>)],
     current: usize,
     pages: usize,
 ) -> String {
     let mut out = "<nav class=\"pagination\" aria-label=\"Results pages\">".to_string();
     let base: String = query
         .iter()
-        .map(|(k, v)| format!("{k}={}&amp;", url(v)))
+        .map(|(k, v)| format!("{}={}&amp;", url(k.as_ref()), url(v.as_ref())))
         .collect();
     for (label, target) in [
         ("← Previous", current.checked_sub(1)),

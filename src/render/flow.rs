@@ -11,11 +11,12 @@ use super::fmt::{self, words};
 use super::layout::page;
 use super::svg::{self, Bar, Spread};
 use super::{
-    badge, bead_link, escape, heading, pagination, person_link, select, state_badges, tone_badge,
+    badge, bead_link, card, escape, heading, pagination, person_link, select, state_badges,
+    tone_badge,
 };
 use crate::flow::{self, By, ClaimState, Item, PAGE_SIZE, STALE_DAYS, Stats, Timing, Window};
 use crate::model::View;
-use crate::profile::Tone;
+use crate::profile::{StateRule, Tone};
 use crate::query::{Facets, href};
 use chrono::{DateTime, Duration, Utc};
 use std::fmt::Write;
@@ -160,34 +161,15 @@ fn left_out(n: usize) -> String {
     )
 }
 
-/// A summary card; `value` is markup.
-fn card(label: &str, value: &str, detail: &str, link: Option<String>) -> String {
-    let inner = format!(
-        "<span>{}</span><strong>{value}</strong><small>{}</small>",
-        escape(label),
-        escape(detail)
-    );
-    match link {
-        Some(href) => format!("<a class=\"metric\" href=\"{}\">{inner}</a>", escape(&href)),
-        None => format!("<div class=\"metric\">{inner}</div>"),
-    }
-}
-
 fn cards(cards: &[String]) -> String {
     format!("<div class=\"metrics flow-cards\">{}</div>", cards.concat())
 }
 
 /// A page of a list: the slice to show and the pager under it.
 fn paged<'a, T>(cx: &Ctx, rows: &'a [T]) -> (&'a [T], String) {
-    let pages = rows.len().div_ceil(PAGE_SIZE).max(1);
-    let current = cx.facets.page().min(pages - 1);
+    let (current, pages) = super::page_of(rows.len(), PAGE_SIZE, cx.facets.page());
     let start = current * PAGE_SIZE;
     let shown = &rows[start..(start + PAGE_SIZE).min(rows.len())];
-    let pairs = cx.facets.pairs();
-    let query: Vec<(&str, &str)> = pairs
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
     let mut pager = String::new();
     if pages > 1 {
         write!(
@@ -196,7 +178,7 @@ fn paged<'a, T>(cx: &Ctx, rows: &'a [T]) -> (&'a [T], String) {
             start + 1,
             start + shown.len(),
             rows.len(),
-            pagination(cx.path, &query, current, pages)
+            pagination(cx.path, &cx.facets.pairs(), current, pages)
         )
         .unwrap();
     }
@@ -1043,11 +1025,9 @@ fn ageing(cx: &Ctx) -> (String, String) {
     let oldest = ages.iter().copied().max();
     let held = |item: &Item| {
         view.row(item.index).is_some_and(|r| {
-            r.states.iter().any(|k| {
-                view.profile
-                    .state(k)
-                    .is_some_and(|s| s.overrides_ready || s.tone == Tone::Bad)
-            })
+            r.states
+                .iter()
+                .any(|k| view.profile.state(k).is_some_and(StateRule::holds))
         })
     };
     let held_count = wip.iter().filter(|i| held(i)).count();

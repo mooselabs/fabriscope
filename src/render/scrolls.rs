@@ -55,8 +55,7 @@ pub fn scrolls(view: &View, filter: &ScrollFilter) -> String {
     body.push_str(&select("status", "Status", &filter.status, &status_options));
     body.push_str("<button type=\"submit\">Apply</button></form>");
     let items: Vec<&Scroll> = s.scrolls.iter().filter(|r| filter.matches(r)).collect();
-    let pages = items.len().div_ceil(PAGE_SIZE).max(1);
-    let current = filter.page.min(pages - 1);
+    let (current, pages) = super::page_of(items.len(), PAGE_SIZE, filter.page);
     write!(
         body,
         "<p class=\"muted\">{} matching scrolls · page {} of {pages}</p>",

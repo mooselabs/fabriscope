@@ -159,6 +159,15 @@ pub struct StateRule {
     pub banner: Option<String>,
 }
 
+impl StateRule {
+    /// Whether this state holds work back: it overrides ready or has the
+    /// bad tone. Such states make the Held tab, `/held` and every "held"
+    /// count.
+    pub fn holds(&self) -> bool {
+        self.overrides_ready || self.tone == Tone::Bad
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GroupRule {
@@ -628,9 +637,7 @@ impl Profile {
     /// Whether any state holds beads back: one that overrides ready or has
     /// the bad tone. The Held tab shows only then.
     pub fn has_held(&self) -> bool {
-        self.states
-            .iter()
-            .any(|s| s.overrides_ready || s.tone == Tone::Bad)
+        self.states.iter().any(StateRule::holds)
     }
 
     /// The label for an opaque fact key, from `[labels]`.

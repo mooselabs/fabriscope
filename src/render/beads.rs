@@ -114,8 +114,7 @@ pub(crate) fn paged<'a>(
     matching: Vec<usize>,
     facets: &Facets,
 ) -> (Vec<(usize, &'a Bead)>, usize, usize, usize) {
-    let pages = matching.len().div_ceil(PAGE_SIZE).max(1);
-    let current = facets.page().min(pages - 1);
+    let (current, pages) = super::page_of(matching.len(), PAGE_SIZE, facets.page());
     let rows = matching
         .iter()
         .enumerate()
@@ -124,20 +123,6 @@ pub(crate) fn paged<'a>(
         .map(|(n, &i)| (n + 1, &s.beads[i]))
         .collect();
     (rows, matching.len(), current, pages)
-}
-
-/// Previous/next links carrying `query`.
-pub(crate) fn pages_nav(
-    path: &str,
-    query: &[(String, String)],
-    current: usize,
-    pages: usize,
-) -> String {
-    let query: Vec<(&str, &str)> = query
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    pagination(path, &query, current, pages)
 }
 
 pub fn beads(view: &View, facets: &Facets) -> String {
@@ -164,7 +149,7 @@ pub fn beads(view: &View, facets: &Facets) -> String {
     )
     .unwrap();
     body.push_str(&bead_table(s, view.provenance.as_ref(), &rows));
-    body.push_str(&pages_nav("/beads", &page_query(facets), current, pages));
+    body.push_str(&pagination("/beads", &page_query(facets), current, pages));
     page(view, "Beads", "/beads", &body)
 }
 

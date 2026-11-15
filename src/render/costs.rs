@@ -11,39 +11,12 @@ use super::{PAGE_SIZE, bead_link, escape, heading, maybe, pagination, run_link, 
 use crate::costs::{self, Figure, ItemRow, Report, Share};
 use crate::model::View;
 use crate::profile::Tone;
-use crate::query::{Facets, Range, href};
-use chrono::{DateTime, Utc};
+use crate::query::{Facets, href};
+use chrono::Utc;
 use std::fmt::Write;
 
-/// The range a factory page measures: the one asked for, else the last 30
-/// days. The flag says whether it is the default.
-pub(super) fn range_or_default(facets: &Facets) -> (Range, bool) {
-    let range = facets.range();
-    if range == Range::default() {
-        (
-            Range {
-                days: Some(30),
-                ..Default::default()
-            },
-            true,
-        )
-    } else {
-        (range, false)
-    }
-}
-
-/// The range in words: `the last 30 days`, `1 Nov – 15 Nov 2026`.
-pub(super) fn range_words(range: Range, now: DateTime<Utc>) -> String {
-    if let Some(days) = range.days {
-        return format!("the last {days} days");
-    }
-    match range.bounds(now) {
-        (Some(from), Some(to)) => format!("{from} to {to}"),
-        (Some(from), None) => format!("from {from}"),
-        (None, Some(to)) => format!("up to {to}"),
-        (None, None) => "all time".into(),
-    }
-}
+/// Days a factory page measures when the query names no range.
+pub(super) const DEFAULT_DAYS: u32 = 30;
 
 /// Days, from and to controls for a filter form (labelled inputs).
 pub(super) fn range_controls(facets: &Facets) -> String {
@@ -86,13 +59,7 @@ pub(super) fn hidden(facets: &Facets, skip: &[&str]) -> String {
 pub(super) fn tiles(cards: &[(&str, String, String)]) -> String {
     let mut out = "<div class=\"metrics tiles\">".to_string();
     for (label, value, detail) in cards {
-        write!(
-            out,
-            "<div class=\"metric\"><span>{}</span><strong>{value}</strong><small>{}</small></div>",
-            escape(label),
-            escape(detail)
-        )
-        .unwrap();
+        out.push_str(&super::card(label, value, detail, None));
     }
     out.push_str("</div>");
     out
@@ -114,7 +81,7 @@ fn dollars(usd: Option<f64>, partial: bool) -> String {
 /// `/costs`.
 pub(crate) fn costs(view: &View, facets: &Facets) -> String {
     let now = Utc::now();
-    let (range, default_range) = range_or_default(facets);
+    let (range, default_range) = facets.range_or(DEFAULT_DAYS);
     // Costs are mostly of closed work: no state filter means every state.
     let items = facets.any_status();
     let picking = picks_items(facets);
@@ -149,7 +116,7 @@ pub(crate) fn costs(view: &View, facets: &Facets) -> String {
         "What the work cost, from the run feed and from provenance usage. When both record an attempt, the run feed's figure counts and the attempt is counted once.",
     );
     body.push_str(&filter_form(view, facets));
-    let when = range_words(range, now);
+    let when = super::range_words(&range, now);
     write!(
         body,
         "<p class=\"muted\">Spend recorded in {}{}.</p>",
@@ -497,8 +464,7 @@ fn item_table(view: &View, facets: &Facets, r: &Report) -> String {
                 .total_cmp(&sort_value(a, sort).unwrap_or(f64::NEG_INFINITY))
         });
     }
-    let pages = rows.len().div_ceil(PAGE_SIZE).max(1);
-    let current = facets.page().min(pages - 1);
+    let (current, pages) = super::page_of(rows.len(), PAGE_SIZE, facets.page());
     let mut out = format!(
         "<section id=\"cost-items\"><h2>By item</h2><p class=\"muted\">{} items. Sorted by {}.</p><div class=\"table-wrap\"><table class=\"data cost-items\"><thead><tr>",
         rows.len(),
@@ -558,12 +524,7 @@ fn item_table(view: &View, facets: &Facets, r: &Report) -> String {
     }
     out.push_str("</tbody></table></div>");
     if pages > 1 {
-        let pairs = facets.pairs();
-        let query: Vec<(&str, &str)> = pairs
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        out.push_str(&pagination("/costs", &query, current, pages));
+        out.push_str(&pagination("/costs", &facets.pairs(), current, pages));
     }
     out.push_str("</section>");
     out

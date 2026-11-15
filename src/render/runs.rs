@@ -155,6 +155,42 @@ fn sha_code(value: &str) -> String {
     )
 }
 
+/// A run-feed fact's label: its own, else the profile's, else the key.
+pub(crate) fn fact_label(view: &View, fact: &Fact) -> String {
+    fact.label
+        .clone()
+        .or_else(|| view.profile.fact_label(&fact.key).map(String::from))
+        .unwrap_or_else(|| fact.key.clone())
+}
+
+/// A run-feed fact's value as HTML, by its declared type (unlinked; a run
+/// page also links it by its `ref`). A `percent` is a percentage (`42.5`
+/// is 42.5%); a value that does not fit its type is shown as text.
+pub(crate) fn fact_text(fact: &Fact) -> String {
+    let Some(text) = crate::profile::text_of(&fact.value) else {
+        return "—".into();
+    };
+    let number = fact.value.as_f64().or_else(|| text.parse().ok());
+    let kind = fact.kind.as_deref().unwrap_or("text");
+    match (kind, number) {
+        ("seconds", Some(n)) => escape(&seconds(n)),
+        ("hours", Some(n)) => escape(&hours(n)),
+        ("usd", Some(n)) => escape(&money(n)),
+        ("tokens", Some(n)) if n >= 0.0 => escape(&tokens(n as u64)),
+        ("count", Some(n)) if n >= 0.0 && n.fract() == 0.0 => count(n as u64),
+        ("percent", Some(n)) => escape(&percent(n / 100.0)),
+        ("sha" | "tree", _) => sha_code(&text),
+        ("bool", _) => match text.as_str() {
+            "true" => "yes".into(),
+            "false" => "no".into(),
+            other => escape(other),
+        },
+        ("timestamp", _) => when(&text),
+        ("id", _) => format!("<code>{}</code>", escape(&text)),
+        _ => escape(&text),
+    }
+}
+
 /// What a page needs to link a run's identifiers.
 struct Ctx<'a> {
     view: &'a View,
@@ -218,29 +254,7 @@ impl Ctx<'_> {
 
     /// A fact's value, formatted by its type and linked by its `ref`.
     fn fact_value(&self, fact: &Fact) -> String {
-        let text = crate::profile::text_of(&fact.value);
-        let Some(text) = text else {
-            return "—".into();
-        };
-        let number = fact.value.as_f64().or_else(|| text.parse().ok());
-        let kind = fact.kind.as_deref().unwrap_or("text");
-        let html = match (kind, number) {
-            ("seconds", Some(n)) => escape(&seconds(n)),
-            ("hours", Some(n)) => escape(&hours(n)),
-            ("usd", Some(n)) => escape(&money(n)),
-            ("tokens", Some(n)) if n >= 0.0 => escape(&tokens(n as u64)),
-            ("count", Some(n)) if n >= 0.0 && n.fract() == 0.0 => count(n as u64),
-            ("percent", Some(n)) => escape(&percent(n)),
-            ("sha" | "tree", _) => sha_code(&text),
-            ("bool", _) => match text.as_str() {
-                "true" => "yes".into(),
-                "false" => "no".into(),
-                other => escape(other),
-            },
-            ("timestamp", _) => when(&text),
-            ("id", _) => format!("<code>{}</code>", escape(&text)),
-            _ => escape(&text),
-        };
+        let html = fact_text(fact);
         let html = match &fact.reference {
             Some(r) => match r.kind.as_str() {
                 "item" => self.item(&r.id, html),
@@ -279,15 +293,10 @@ impl Ctx<'_> {
         }
         let mut out = "<dl class=\"facts\">".to_string();
         for fact in facts {
-            let label = fact
-                .label
-                .as_deref()
-                .or_else(|| self.view.profile.fact_label(&fact.key))
-                .unwrap_or(&fact.key);
             write!(
                 out,
                 "<dt>{}</dt><dd>{}</dd>",
-                escape(label),
+                escape(&fact_label(self.view, fact)),
                 self.fact_value(fact)
             )
             .unwrap();
@@ -451,8 +460,7 @@ pub(crate) fn runs(view: &View, facets: &Facets) -> String {
         }
     )
     .unwrap();
-    let pages = listed.len().div_ceil(PAGE_SIZE).max(1);
-    let current = facets.page().min(pages - 1);
+    let (current, pages) = super::page_of(listed.len(), PAGE_SIZE, facets.page());
     if listed.is_empty() {
         body.push_str("<p class=\"empty\">No runs match this view.</p>");
     } else {

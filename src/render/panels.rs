@@ -4,7 +4,7 @@
 //! `render::values::value`), the held banner (why, next, commands), and the
 //! runs and receipts joined to the bead.
 
-use super::fmt::{count, money, seconds, tokens, when, words};
+use super::fmt::{money, when, words};
 use super::values::{Ctx, value};
 use super::{bead_link, escape, run_link, tone_badge, url};
 use crate::beads::Bead;
@@ -23,41 +23,6 @@ pub(crate) fn source_label(view: &View, source: &Source) -> String {
     }
     let tail = key.rsplit([':', '.']).next().unwrap_or(&key);
     words(tail)
-}
-
-/// A run-feed fact's label: its own, else the profile's, else the key.
-pub(crate) fn feed_label(view: &View, fact: &runs::Fact) -> String {
-    fact.label
-        .clone()
-        .or_else(|| view.profile.fact_label(&fact.key).map(String::from))
-        .unwrap_or_else(|| fact.key.clone())
-}
-
-/// A run-feed fact's value as HTML, by its declared type.
-pub(crate) fn feed_value(fact: &runs::Fact) -> String {
-    let number = fact.value.as_f64();
-    let text = crate::profile::text_of(&fact.value).unwrap_or_default();
-    match (fact.kind.as_deref(), number) {
-        (Some("usd"), Some(n)) => escape(&money(n)),
-        (Some("seconds"), Some(n)) => escape(&seconds(n)),
-        (Some("hours"), Some(n)) => escape(&seconds(n * 3600.0)),
-        (Some("tokens"), Some(n)) => escape(&tokens(n.max(0.0) as u64)),
-        (Some("count"), Some(n)) => escape(&count(n.max(0.0) as u64)),
-        (Some("percent"), Some(n)) => escape(&format!("{n}%")),
-        (Some("sha" | "tree"), _) => format!(
-            "<code title=\"{}\">{}</code>",
-            escape(&text),
-            escape(text.get(..9).unwrap_or(&text))
-        ),
-        (Some("id"), _) => format!("<code>{}</code>", escape(&text)),
-        (Some("timestamp"), _) => when(&text),
-        (Some("bool"), _) => match text.as_str() {
-            "true" => "yes".into(),
-            "false" => "no".into(),
-            other => escape(other),
-        },
-        _ => escape(&text),
-    }
 }
 
 /// One field of a panel or receipt, or `None` when it has no value.

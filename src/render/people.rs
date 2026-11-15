@@ -11,9 +11,10 @@
 //! the person made, in the page's date range (the last seven days unless the
 //! query names one).
 
-use super::activity::{self, filter_form, range, range_links, range_words};
+use super::activity::{self, filter_form, range, range_links};
 use super::fmt::{when, words};
 use super::layout::page;
+use super::range_words;
 use super::table::bead_table;
 use super::{escape, group_link, heading, person_link};
 use crate::beads::{Bead, Snapshot};

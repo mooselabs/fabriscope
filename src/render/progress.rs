@@ -5,7 +5,8 @@
 //! compact bar in tables, and the progress section of a bead's page.
 
 use super::fmt::{count, money, seconds, tokens, when, words};
-use super::panels::{feed_label, feed_value, joined};
+use super::panels::joined;
+use super::runs::{fact_label, fact_text};
 use super::{escape, maybe, run_link, tone_badge, url};
 use crate::beads::Bead;
 use crate::model::View;
@@ -327,8 +328,8 @@ fn feed_attempt(view: &View, bead: &Bead, id: &str) -> String {
             write!(
                 out,
                 "<dt>{}</dt><dd>{}</dd>",
-                escape(&feed_label(view, f)),
-                feed_value(f)
+                escape(&fact_label(view, f)),
+                fact_text(f)
             )
             .unwrap();
         }

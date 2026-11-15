@@ -169,8 +169,7 @@ pub(crate) fn receipts(view: &View, facets: &Facets) -> String {
         write!(body, "<p class=\"muted\">{unread} receipt rows match no <code>[[receipts]]</code> rule and are not shown.</p>").unwrap();
     }
     shown.sort_by(|a, b| b.at.cmp(&a.at).then(b.index.cmp(&a.index)));
-    let pages = shown.len().div_ceil(PAGE_SIZE).max(1);
-    let current = facets.page().min(pages - 1);
+    let (current, pages) = super::page_of(shown.len(), PAGE_SIZE, facets.page());
     write!(
         body,
         "<section id=\"receipt-list\"><h2>{} <span class=\"muted\">{}</span></h2>",
@@ -192,12 +191,7 @@ pub(crate) fn receipts(view: &View, facets: &Facets) -> String {
     }
     body.push_str("</tbody></table></div>");
     if pages > 1 {
-        let pairs = facets.pairs();
-        let query: Vec<(&str, &str)> = pairs
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        body.push_str(&pagination("/receipts", &query, current, pages));
+        body.push_str(&pagination("/receipts", &facets.pairs(), current, pages));
     }
     body.push_str("</section>");
     page(view, "Receipts", "/receipts", &body)

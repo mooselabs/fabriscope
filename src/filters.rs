@@ -25,13 +25,9 @@ pub(crate) fn profiled(profile: &Profile) -> bool {
         && profile.people.roles.is_empty())
 }
 
-/// The states that hold items back (`overrides_ready`), in profile order.
+/// The states that hold items back (`StateRule::holds`), in profile order.
 pub(crate) fn holding(profile: &Profile) -> Vec<&StateRule> {
-    profile
-        .states
-        .iter()
-        .filter(|s| s.overrides_ready)
-        .collect()
+    profile.states.iter().filter(|s| s.holds()).collect()
 }
 
 /// How a set of items stands. `open` counts every item not closed (so it

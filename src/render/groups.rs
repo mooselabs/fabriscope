@@ -9,7 +9,7 @@
 //! Counts honour every facet in the URL except the stored state, so each
 //! state shows side by side; the members table honours them all.
 
-use super::beads::{paged, pages_nav};
+use super::beads::paged;
 use super::layout::page;
 use super::table::bead_table;
 use super::{
@@ -295,7 +295,7 @@ pub(crate) fn lane(view: &View, group: &str, value: &str, facets: &Facets) -> Op
     )
     .unwrap();
     body.push_str(&bead_table(s, view.provenance.as_ref(), &rows));
-    body.push_str(&pages_nav(&path, &facets.pairs(), current, pages));
+    body.push_str(&super::pagination(&path, &facets.pairs(), current, pages));
     body.push_str("</section>");
     Some(page(
         view,

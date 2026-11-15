@@ -9,7 +9,7 @@
 //! (the provenance attempt, else a fact whose value names a run's attempt),
 //! else through the newest stopped run of the item.
 
-use super::costs::{hidden, range_controls, range_or_default, range_words, tiles};
+use super::costs::{DEFAULT_DAYS, hidden, range_controls, tiles};
 use super::fmt::{seconds, when, words};
 use super::layout::page;
 use super::svg::{Bar, hbars};
@@ -185,11 +185,7 @@ pub(crate) fn held(view: &View, facets: &Facets) -> String {
     // `by` chooses what rows group by: a fact source as the profile writes
     // it, or `group:<key>`.
     let by = facets.by.as_str();
-    let held: Vec<&StateRule> = p
-        .states
-        .iter()
-        .filter(|s| s.overrides_ready || s.tone == Tone::Bad)
-        .collect();
+    let held: Vec<&StateRule> = p.states.iter().filter(|s| s.holds()).collect();
     let mut body = heading(
         "Factory",
         "Held",
@@ -449,7 +445,7 @@ fn stop_history(view: &View, facets: &Facets, now: DateTime<Utc>) -> String {
     let Some(s) = view.snapshot() else {
         return String::new();
     };
-    let (range, default) = range_or_default(facets);
+    let (range, default) = facets.range_or(DEFAULT_DAYS);
     // Stops are history: no state filter means every state.
     let items = facets.any_status();
     let in_range = |at: &str| range.contains(at, now);
@@ -581,7 +577,7 @@ fn stop_history(view: &View, facets: &Facets, now: DateTime<Utc>) -> String {
     resumed.sort_by(f64::total_cmp);
     let mut out = format!(
         "<section id=\"stop-history\"><h2>Stop history</h2><p class=\"muted\">Stops in {}{}, from every source read. History read for {threads} of {considered} items; provenance read for {trails} of {considered} items{}.</p>",
-        escape(&range_words(range, now)),
+        escape(&super::range_words(&range, now)),
         if default { " (the default)" } else { "" },
         if view.run_index().is_some() {
             "; the run feed lists its own stops"

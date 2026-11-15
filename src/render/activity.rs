@@ -33,33 +33,7 @@ const DEFAULT_DAYS: u32 = 7;
 /// The date range a page measures: the query's, else the last
 /// `DEFAULT_DAYS` days.
 pub(crate) fn range(facets: &Facets) -> Range {
-    let range = facets.range();
-    if range.from.is_none() && range.to.is_none() && range.days.is_none() {
-        Range {
-            days: Some(DEFAULT_DAYS),
-            ..range
-        }
-    } else {
-        range
-    }
-}
-
-/// Words for a range at `now`: "the last 7 days", "1 Nov – 2 Nov".
-pub(crate) fn range_words(range: &Range, now: DateTime<Utc>) -> String {
-    if let Some(days) = range.days {
-        return if days == 1 {
-            "today".into()
-        } else {
-            format!("the last {days} days")
-        };
-    }
-    let day = |d: NaiveDate| d.format("%-d %b %Y").to_string();
-    match range.bounds(now) {
-        (Some(from), Some(to)) => format!("{} to {}", day(from), day(to)),
-        (Some(from), None) => format!("since {}", day(from)),
-        (None, Some(to)) => format!("up to {}", day(to)),
-        (None, None) => "all time".into(),
-    }
+    facets.range_or(DEFAULT_DAYS).0
 }
 
 /// Where an entry came from; borrowed from the view, so collecting costs
@@ -627,24 +601,18 @@ pub(crate) fn activity(view: &View, facets: &Facets) -> String {
     ));
     body.push_str(&range_links("/activity", facets));
     let total = timeline.len();
-    let pages = total.div_ceil(PAGE_SIZE).max(1);
-    let current = facets.page().min(pages - 1);
+    let (current, pages) = super::page_of(total, PAGE_SIZE, facets.page());
     write!(
         body,
         "<p class=\"muted\">{total} entries · {} · page {} of {pages}{}</p>",
-        escape(&range_words(&range(facets), now)),
+        escape(&super::range_words(&range(facets), now)),
         current + 1,
         coverage(view, s)
     )
     .unwrap();
     let shown = timeline.page(current, PAGE_SIZE);
     body.push_str(&rows(view, s, shown));
-    let query = facets.pairs();
-    let query: Vec<(&str, &str)> = query
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    body.push_str(&pagination("/activity", &query, current, pages));
+    body.push_str(&pagination("/activity", &facets.pairs(), current, pages));
     page(view, "Activity", "/activity", &body)
 }
 
