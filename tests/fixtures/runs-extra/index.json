@@ -1,0 +1,84 @@
+{
+  "schema": "runfeed.index.v1",
+  "revision": 1,
+  "runs": [
+    {
+      "run": "odd run/1",
+      "subject": {
+        "ref": "WEIRD a/b?#ü",
+        "title": "Odd <names> & co"
+      },
+      "group": {
+        "rig": "gamma"
+      },
+      "state": "passed",
+      "started_at": "2026-11-15T08:00:00Z",
+      "ended_at": "2026-11-15T08:30:00Z",
+      "updated_at": "2026-11-15T08:31:00Z",
+      "digest": "162abf69bd08d19380fc8701b970d1ee77f2a7d216a9b533f132ab89a4f84ff3",
+      "href": "runs/odd%20run%2F1.json",
+      "cost_usd": 0.5,
+      "attempts": 1
+    },
+    {
+      "run": "escape-dotdot",
+      "subject": {
+        "id": "escape-dotdot"
+      },
+      "group": {
+        "rig": "gamma"
+      },
+      "state": "failed",
+      "started_at": "2026-11-15T07:00:00Z",
+      "updated_at": "2026-11-15T07:00:00Z",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "href": "../secret.json",
+      "attempts": 1
+    },
+    {
+      "run": "escape-abs",
+      "subject": {
+        "id": "escape-abs"
+      },
+      "group": {
+        "rig": "gamma"
+      },
+      "state": "failed",
+      "started_at": "2026-11-15T07:00:00Z",
+      "updated_at": "2026-11-15T07:00:00Z",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "href": "/etc/passwd",
+      "attempts": 1
+    },
+    {
+      "run": "escape-pct",
+      "subject": {
+        "id": "escape-pct"
+      },
+      "group": {
+        "rig": "gamma"
+      },
+      "state": "failed",
+      "started_at": "2026-11-15T07:00:00Z",
+      "updated_at": "2026-11-15T07:00:00Z",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "href": "runs/%2E%2E%2F%2E%2E%2Fsecret.json",
+      "attempts": 1
+    },
+    {
+      "run": "escape-link",
+      "subject": {
+        "id": "escape-link"
+      },
+      "group": {
+        "rig": "gamma"
+      },
+      "state": "failed",
+      "started_at": "2026-11-15T07:00:00Z",
+      "updated_at": "2026-11-15T07:00:00Z",
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "href": "runs/link.json",
+      "attempts": 1
+    }
+  ]
+}

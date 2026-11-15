@@ -1,0 +1,600 @@
+//! Server-rendered HTML. Every value from a store is escaped; Markdown is
+//! rendered without raw HTML or images, and links only ever point at external
+//! web pages or at other records on this server.
+//!
+//! Each page lives in its own module, owned by one work package (see the
+//! comment at the top of each file); the helpers every page shares live
+//! here and in `fmt`, `values`, `svg` and `layout`, all `pub(crate)` so any
+//! page module or `web::*` handler can call them.
+
+pub(crate) mod activity;
+pub(crate) mod bead;
+pub(crate) mod beads;
+pub(crate) mod boards;
+pub(crate) mod costs;
+pub(crate) mod flow;
+pub(crate) mod fmt;
+pub(crate) mod groups;
+pub(crate) mod held;
+pub(crate) mod layout;
+pub(crate) mod markdown;
+pub(crate) mod overview;
+pub(crate) mod panels;
+pub(crate) mod people;
+pub(crate) mod progress;
+pub(crate) mod receipts;
+pub(crate) mod runs;
+pub(crate) mod scrolls;
+pub(crate) mod search;
+pub(crate) mod svg;
+pub(crate) mod table;
+pub(crate) mod timeline;
+pub(crate) mod values;
+
+pub use bead::bead;
+pub use beads::{beads, epics};
+pub use layout::not_found;
+pub use overview::overview;
+pub use scrolls::{scroll, scrolls};
+
+use crate::beads::Bead;
+use crate::model::View;
+use crate::profile::{RowFacts, Tone};
+use crate::query::Facets;
+use fmt::words;
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use std::collections::BTreeMap;
+use std::fmt::Write;
+
+/// Rows per page on every paged list.
+pub(crate) const PAGE_SIZE: usize = 100;
+
+/// HTML-escapes text for element content and attribute values.
+pub fn escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// Percent-encodes one path segment or query value.
+pub(crate) fn url(value: &str) -> String {
+    utf8_percent_encode(value, NON_ALPHANUMERIC).to_string()
+}
+
+/// A link to a bead's page.
+pub(crate) fn bead_link(id: &str, title: &str) -> String {
+    format!("<a href=\"/bead/{}\">{}</a>", url(id), escape(title))
+}
+
+/// A link to a scroll's page.
+pub(crate) fn scroll_link(id: &str, title: &str) -> String {
+    format!("<a href=\"/scroll/{}\">{}</a>", url(id), escape(title))
+}
+
+/// A link to a person's page (`/person/{name}`), with the name as text.
+pub(crate) fn person_link(name: &str) -> String {
+    format!("<a href=\"/person/{}\">{}</a>", url(name), escape(name))
+}
+
+/// A link to one value of a profile group (`/by/{group}/{value}`).
+pub(crate) fn group_link(group: &str, value: &str, text: &str) -> String {
+    format!(
+        "<a href=\"/by/{}/{}\">{}</a>",
+        url(group),
+        url(value),
+        escape(text)
+    )
+}
+
+/// `group_link` when the ledger has a page for that value, else the text:
+/// a receipt or hidden row can name a value no item has.
+pub(crate) fn listed_group_link(view: &View, group: &str, value: &str, text: &str) -> String {
+    let listed = view
+        .group_index()
+        .and_then(|g| g.get(group))
+        .is_some_and(|values| values.contains_key(value));
+    if listed {
+        group_link(group, value, text)
+    } else {
+        escape(text)
+    }
+}
+
+/// A link to a run's page (`/run/{id}`).
+pub(crate) fn run_link(run: &str, text: &str) -> String {
+    format!("<a href=\"/run/{}\">{}</a>", url(run), escape(text))
+}
+
+/// The CSS class for a tone: badges, banners, facts and chart marks all
+/// colour by it (`good` green, `warn` and `waiting` amber, `bad` red,
+/// `neutral` grey).
+pub(crate) fn tone_class(tone: Tone) -> &'static str {
+    match tone {
+        Tone::Good => "good",
+        Tone::Warn => "warn",
+        Tone::Bad => "bad",
+        Tone::Waiting => "waiting",
+        Tone::Neutral => "neutral",
+    }
+}
+
+/// A badge with this text in this tone.
+pub(crate) fn tone_badge(text: &str, tone: Tone) -> String {
+    format!(
+        "<span class=\"badge {}\">{}</span>",
+        tone_class(tone),
+        escape(text)
+    )
+}
+
+/// One badge per derived state of a row, labelled and toned by the
+/// profile; empty when the row is in no state.
+pub(crate) fn state_badges(view: &View, row: &RowFacts) -> String {
+    row.states
+        .iter()
+        .filter_map(|key| view.profile.state(key))
+        .map(|state| tone_badge(&state.label, state.tone))
+        .collect()
+}
+
+/// A bead's status exactly as Beads stores it. The colour follows the
+/// category `bd statuses` gives each built-in status; a custom status is
+/// shown in the neutral colour.
+pub(crate) fn badge(status: &str) -> String {
+    let class = match status {
+        "open" => "open",
+        "in_progress" | "hooked" => "working",
+        "blocked" => "waiting",
+        "closed" => "done",
+        _ => "neutral",
+    };
+    format!(
+        "<span class=\"badge {class}\">{}</span>",
+        escape(&words(status))
+    )
+}
+
+/// Built-in Beads statuses in the order `bd statuses` lists them.
+pub(crate) const STATUS_ORDER: [&str; 7] = [
+    "open",
+    "in_progress",
+    "blocked",
+    "deferred",
+    "closed",
+    "pinned",
+    "hooked",
+];
+
+/// Each distinct value of `field` among `beads`, with how many beads hold
+/// it, so a filter offers exactly what the store contains. Statuses keep the
+/// Beads order; anything else, and any custom status, sorts by name.
+pub(crate) fn tally<'a>(
+    beads: impl Iterator<Item = &'a Bead>,
+    field: impl Fn(&'a Bead) -> &'a str,
+) -> Vec<(&'a str, usize)> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for bead in beads {
+        let value = field(bead);
+        if !value.is_empty() {
+            *counts.entry(value).or_default() += 1;
+        }
+    }
+    let mut out: Vec<_> = counts.into_iter().collect();
+    out.sort_by_key(|(value, _)| {
+        (
+            STATUS_ORDER
+                .iter()
+                .position(|s| s == value)
+                .unwrap_or(STATUS_ORDER.len()),
+            *value,
+        )
+    });
+    out
+}
+
+/// Filter options for every stored status: beads not closed (the default),
+/// all beads, then each status the store holds.
+pub(crate) fn status_options<'a>(beads: impl Iterator<Item = &'a Bead>) -> Vec<(String, String)> {
+    let mut options = vec![
+        (String::new(), "Not closed".to_string()),
+        ("all".to_string(), "All".to_string()),
+    ];
+    options.extend(
+        tally(beads, |b| b.status.as_str())
+            .into_iter()
+            .map(|(status, n)| (status.to_string(), format!("{} ({n})", words(status)))),
+    );
+    options
+}
+
+/// Words for a range at `now`: "today", "the last 7 days",
+/// "1 Nov 2026 to 15 Nov 2026", "since …", "up to …" or "all time".
+pub(crate) fn range_words(
+    range: &crate::query::Range,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    if let Some(days) = range.days {
+        return if days == 1 {
+            "today".into()
+        } else {
+            format!("the last {days} days")
+        };
+    }
+    let day = |d: chrono::NaiveDate| d.format("%-d %b %Y").to_string();
+    match range.bounds(now) {
+        (Some(from), Some(to)) => format!("{} to {}", day(from), day(to)),
+        (Some(from), None) => format!("since {}", day(from)),
+        (None, Some(to)) => format!("up to {}", day(to)),
+        (None, None) => "all time".into(),
+    }
+}
+
+/// A muted "unknown": what every page shows for a value nobody recorded,
+/// never 0.
+pub(crate) fn unknown() -> &'static str {
+    "<span class=\"muted\">unknown</span>"
+}
+
+/// A recorded value shown by `show` and escaped, or `unknown()`.
+pub(crate) fn maybe<T: Copy>(value: Option<T>, show: impl Fn(T) -> String) -> String {
+    value
+        .map(|v| escape(&show(v)))
+        .unwrap_or_else(|| unknown().into())
+}
+
+pub(crate) fn selected(on: bool) -> &'static str {
+    if on { " selected" } else { "" }
+}
+
+/// The page heading: a small eyebrow line, the title and a lede.
+pub(crate) fn heading(eyebrow: &str, title: &str, description: &str) -> String {
+    format!(
+        "<div class=\"page-heading\"><p class=\"eyebrow\">{}</p><h1>{}</h1><p class=\"lede\">{}</p></div>",
+        escape(eyebrow),
+        escape(title),
+        escape(description)
+    )
+}
+
+/// One metric card: a label, a value (markup), a detail line, and a link
+/// when the card opens a list.
+pub(crate) fn card(label: &str, value: &str, detail: &str, link: Option<String>) -> String {
+    let inner = format!(
+        "<span>{}</span><strong>{value}</strong><small>{}</small>",
+        escape(label),
+        escape(detail)
+    );
+    match link {
+        Some(href) => format!("<a class=\"metric\" href=\"{}\">{inner}</a>", escape(&href)),
+        None => format!("<div class=\"metric\">{inner}</div>"),
+    }
+}
+
+/// A row of linked metric cards: (label, value, detail, href).
+pub(crate) fn metrics(cards: &[(&str, usize, &str, String)]) -> String {
+    let mut out = "<div class=\"metrics\">".to_string();
+    for (label, value, detail, href) in cards {
+        out.push_str(&card(label, &value.to_string(), detail, Some(href.clone())));
+    }
+    out.push_str("</div>");
+    out
+}
+
+/// A labelled `<select>` named `name`, with `current` selected; options
+/// are (value, text).
+pub(crate) fn select(
+    name: &str,
+    label: &str,
+    current: &str,
+    options: &[(String, String)],
+) -> String {
+    let mut out = format!("<label>{}<select name=\"{name}\">", escape(label));
+    for (value, text) in options {
+        write!(
+            out,
+            "<option value=\"{}\"{}>{}</option>",
+            escape(value),
+            selected(current == value),
+            escape(text)
+        )
+        .unwrap();
+    }
+    out.push_str("</select></label>");
+    out
+}
+
+/// The page shown and the page count for `len` rows, `size` to a page,
+/// when the query asks for page `requested` (0-based; past the end shows
+/// the last page).
+pub(crate) fn page_of(len: usize, size: usize, requested: usize) -> (usize, usize) {
+    let pages = len.div_ceil(size).max(1);
+    (requested.min(pages - 1), pages)
+}
+
+/// Previous/next links for page `current` of `pages`, carrying `query`
+/// (`Facets::pairs`, say).
+pub(crate) fn pagination(
+    path: &str,
+    query: &[(impl AsRef<str>, impl AsRef<str>)],
+    current: usize,
+    pages: usize,
+) -> String {
+    let mut out = "<nav class=\"pagination\" aria-label=\"Results pages\">".to_string();
+    let base: String = query
+        .iter()
+        .map(|(k, v)| format!("{}={}&amp;", url(k.as_ref()), url(v.as_ref())))
+        .collect();
+    for (label, target) in [
+        ("← Previous", current.checked_sub(1)),
+        ("Next →", (current + 1 < pages).then_some(current + 1)),
+    ] {
+        if let Some(target) = target {
+            write!(out, "<a href=\"{path}?{base}page={target}\">{label}</a>").unwrap();
+        }
+    }
+    out.push_str("</nav>");
+    out
+}
+
+/// The shared filter form for list pages: search, state, type, kind,
+/// derived state, person, epic and one select per profile group, each with
+/// the values the store holds. Submits to `path` with GET, so the filters
+/// live in the URL.
+pub(crate) fn facets_form(view: &View, facets: &Facets, path: &str) -> String {
+    let mut out = format!(
+        "<form class=\"filters\" action=\"{}\" method=\"get\"><label>Search<input type=\"search\" name=\"q\" value=\"{}\" placeholder=\"Title, id or label…\"></label>",
+        escape(path),
+        escape(&facets.q)
+    );
+    let Some(s) = view.snapshot() else {
+        out.push_str("<button type=\"submit\">Apply</button></form>");
+        return out;
+    };
+    let items = || {
+        s.beads
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| s.derived.is_item(*i))
+            .map(|(_, b)| b)
+    };
+    out.push_str(&select(
+        "state",
+        "State",
+        &facets.state,
+        &status_options(items()),
+    ));
+    let mut types = vec![(String::new(), "All types".to_string())];
+    types.extend(
+        tally(items(), |b| b.issue_type.as_str())
+            .into_iter()
+            .map(|(t, n)| (t.to_string(), format!("{} ({n})", words(t)))),
+    );
+    out.push_str(&select("type", "Type", &facets.issue_type, &types));
+    let all = |label: &str| vec![(String::new(), label.to_string())];
+    if !view.profile.kinds.is_empty() {
+        let mut kinds = all("All kinds");
+        kinds.extend(
+            view.profile
+                .kinds
+                .iter()
+                .map(|k| (k.key.clone(), k.label.clone())),
+        );
+        out.push_str(&select("kind", "Kind", &facets.kind, &kinds));
+    }
+    if !view.profile.states.is_empty() {
+        let mut states = all("Any");
+        states.extend(
+            view.profile
+                .states
+                .iter()
+                .map(|k| (k.key.clone(), k.label.clone())),
+        );
+        out.push_str(&select("dstate", "Derived state", &facets.dstate, &states));
+    }
+    if !s.derived.people.is_empty() {
+        let mut people = all("Anyone");
+        people.extend(s.derived.people.keys().map(|p| (p.clone(), p.clone())));
+        out.push_str(&select("person", "Person", &facets.person, &people));
+    }
+    let mut epics = all("Any epic");
+    epics.extend(
+        s.ordered()
+            .filter(|b| b.is_epic())
+            .map(|b| (b.id.clone(), b.title.clone())),
+    );
+    if epics.len() > 1 {
+        out.push_str(&select("epic", "Epic", &facets.epic, &epics));
+    }
+    // A profile may define many groups. The first few stay in view; the
+    // rest fold away unless one of them is filtering.
+    const SHOWN: usize = 3;
+    let folded = view.profile.groups.len() > SHOWN;
+    for (n, group) in view.profile.groups.iter().enumerate() {
+        if folded && n == SHOWN {
+            let open = view.profile.groups[SHOWN..]
+                .iter()
+                .any(|g| facets.groups.get(&g.key).is_some_and(|v| !v.is_empty()));
+            out.push_str(&format!(
+                "<details class=\"more-filters\" id=\"more-filters\"{}><summary>More filters</summary><div class=\"filters-more\">",
+                if open { " open" } else { "" }
+            ));
+        }
+        let mut values = all(&format!("Any {}", group.label.to_lowercase()));
+        if let Some(index) = s.derived.groups.get(&group.key) {
+            values.extend(
+                index
+                    .iter()
+                    .map(|(v, members)| (v.clone(), format!("{v} ({})", members.len()))),
+            );
+        }
+        let current = facets
+            .groups
+            .get(&group.key)
+            .map(String::as_str)
+            .unwrap_or("");
+        out.push_str(&select(&group.key, &group.label, current, &values));
+    }
+    if folded {
+        out.push_str("</div></details>");
+    }
+    out.push_str("<button type=\"submit\">Apply</button></form>");
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::beads::{self, Bead};
+    use crate::model::{Feed, ScrollFilter, View};
+    use crate::provenance;
+    use crate::scrolls::{self, Scroll};
+    use std::sync::Arc;
+
+    pub(super) fn view() -> View {
+        let mut bead = Bead {
+            id: "fx-1".into(),
+            title: "Fix login".into(),
+            status: "open".into(),
+            external_ref: "TICKET-12".into(),
+            ..Default::default()
+        };
+        bead.created_at = Some("2026-10-01T00:00:00Z".into());
+        let beads = beads::Snapshot::new(
+            vec![bead],
+            vec!["fx-1".into()],
+            Some("abcdef0123456789".into()),
+            chrono::Utc::now(),
+        );
+        let records = vec![
+            Scroll {
+                id: "sc-a".into(),
+                kind: "decision".into(),
+                title: "Use Dolt".into(),
+                path: Some("decisions/a.md".into()),
+                ..Default::default()
+            },
+            Scroll {
+                id: "sc-b".into(),
+                kind: "note".into(),
+                title: "Notes".into(),
+                path: Some("notes/b.md".into()),
+                ..Default::default()
+            },
+        ];
+        let edges = vec![scrolls::Edge {
+            from: "sc-a".into(),
+            rel: "related_work".into(),
+            to: "beads://store/fx-1".into(),
+            why: None,
+        }];
+        View {
+            title: "demo".into(),
+            beads: Some(Feed {
+                data: Arc::new(beads),
+                error: None,
+            }),
+            scrolls: Some(Feed {
+                data: Arc::new(scrolls::Snapshot::new(records, edges, Some("rev".into()))),
+                error: None,
+            }),
+            revision: 3,
+            scrolls_checked_at: None,
+            provenance: None,
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn with_trail(mut view: View, events: &str) -> View {
+        let mut store = provenance::Store::default();
+        store.record("fx-1", provenance::parse(events), None, chrono::Utc::now());
+        view.provenance = Some(store);
+        view
+    }
+
+    #[test]
+    fn pages_show_both_stores_and_cross_links() {
+        let view = view();
+        let page = overview(&view);
+        assert!(page.contains("Fabriscope <span class=\"muted\">/ demo</span>"));
+        assert!(page.contains("Beads · commit abcdef012"));
+        let mut served = view.clone();
+        let mut data = (*served.beads.as_ref().unwrap().data).clone();
+        data.source = "bd serve http://127.0.0.1:9".into();
+        served.beads = Some(Feed {
+            data: Arc::new(data),
+            error: None,
+        });
+        assert!(
+            overview(&served).contains("Beads via bd serve http://127.0.0.1:9 · commit abcdef012")
+        );
+        assert!(page.contains("Scrolls · revision rev"));
+        assert!(page.contains("/bead/fx%2D1"));
+        let bead = bead(&view, "fx-1").unwrap();
+        assert!(bead.contains("Scrolls about this bead"));
+        assert!(bead.contains("/scroll/sc%2Da"));
+        let scroll = scroll(&view, "sc-a").unwrap();
+        assert!(scroll.contains("bead fx-1"));
+        assert!(bead_page_absent(&view));
+    }
+
+    fn bead_page_absent(view: &View) -> bool {
+        bead(view, "nope").is_none() && scroll(view, "nope").is_none()
+    }
+
+    #[test]
+    fn a_beads_only_view_hides_scroll_navigation() {
+        let mut view = view();
+        view.scrolls = None;
+        let page = overview(&view);
+        assert!(!page.contains("href=\"/scrolls\""));
+        assert!(page.contains("href=\"/beads\""), "the Work section");
+        assert!(beads(&view, &Facets::default()).contains("href=\"/epics\""));
+        assert!(scrolls(&view, &ScrollFilter::default()).contains("404"));
+    }
+
+    #[test]
+    fn shared_helpers_link_badge_and_build_the_filter_form() {
+        let view = crate::testing::work_view();
+        let s = view.snapshot().unwrap();
+        let held = &s.derived.rows[s.position("wk-3").unwrap()];
+        assert_eq!(
+            state_badges(&view, held),
+            "<span class=\"badge bad\">Held</span>"
+        );
+        assert_eq!(
+            group_link("milestone", "v 1", "<v1>"),
+            "<a href=\"/by/milestone/v%201\">&lt;v1&gt;</a>"
+        );
+        // A value no item has (a receipt's, say) has no page to link to.
+        assert_eq!(
+            listed_group_link(&view, "milestone", "v1", "v1"),
+            "<a href=\"/by/milestone/v1\">v1</a>"
+        );
+        assert_eq!(
+            listed_group_link(&view, "milestone", "<v9>", "<v9>"),
+            "&lt;v9&gt;"
+        );
+        assert_eq!(
+            run_link("run-0002", "Run 2"),
+            "<a href=\"/run/run%2D0002\">Run 2</a>"
+        );
+        let form = facets_form(&view, &crate::query::Facets::default(), "/beads");
+        for wanted in [
+            "name=\"dstate\"",
+            "name=\"kind\"",
+            "name=\"milestone\"",
+            "<option value=\"v1\">v1 (3)</option>",
+            "name=\"person\"",
+            "name=\"epic\"",
+        ] {
+            assert!(form.contains(wanted), "{wanted}: {form}");
+        }
+        assert!(
+            !form.contains("work-receipt"),
+            "receipts are not offered as a type"
+        );
+    }
+}

@@ -5,12 +5,14 @@
 //! which open issues are ready; Fabriscope never re-derives that rule.
 //! `bd vc status` is the cheap change probe when a local directory is known.
 
+use crate::profile::{Derived, Profile};
 use crate::serve::Api;
 use crate::tools::{Tool, run};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
@@ -33,6 +35,22 @@ pub struct Bead {
     pub external_ref: String,
     pub dependencies: Vec<Dependency>,
     pub metadata: Value,
+    /// Native columns a store may fill. On a store that leaves them out
+    /// they stay empty; only `started_at` (kept after close) and
+    /// `comment_count` are common.
+    pub started_at: Option<String>,
+    pub created_by: String,
+    pub owner: String,
+    pub estimated_minutes: Option<i64>,
+    pub due_at: Option<String>,
+    pub defer_until: Option<String>,
+    pub lease_expires_at: Option<String>,
+    pub heartbeat_at: Option<String>,
+    pub is_blocked: Option<bool>,
+    pub comment_count: Option<u64>,
+    /// Comments, when the read carries them (`bd export` does; the list API
+    /// does not). History events are parsed from these; see `history`.
+    pub comments: Vec<Comment>,
     /// Computed: whether `bd ready` listed this bead. Readiness is Beads'
     /// answer about dependencies, shown beside the stored status, never
     /// instead of it.
@@ -51,6 +69,16 @@ pub struct Dependency {
     pub depends_on_id: String,
     #[serde(rename = "type")]
     pub kind: String,
+}
+
+/// One comment on a bead, as `bd export` and `bd show` print it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Comment {
+    pub id: Option<String>,
+    pub author: Option<String>,
+    pub text: String,
+    pub created_at: Option<String>,
 }
 
 impl Bead {
@@ -73,14 +101,6 @@ impl Bead {
     }
 }
 
-/// The string at a dot-separated path inside a metadata object.
-fn metadata_str<'a>(metadata: &'a Value, path: &str) -> Option<&'a str> {
-    path.split('.')
-        .try_fold(metadata, |value, key| value.get(key))?
-        .as_str()
-        .filter(|s| !s.is_empty())
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub generated_at: String,
@@ -92,11 +112,16 @@ pub struct Snapshot {
     pub commit: Option<String>,
     pub beads: Vec<Bead>,
     index: HashMap<String, usize>,
+    /// External reference → index, first bead wins.
+    by_ref: HashMap<String, usize>,
     /// Bead indexes in display order: priority, then age, then id.
     pub order: Vec<usize>,
     /// Ready bead ids in the order `bd ready` returned them.
     pub ready: Vec<String>,
+    /// Counts per UTC day, over work items only.
     pub history: History,
+    /// What the profile says about each bead, index-aligned with `beads`.
+    pub derived: Derived,
 }
 
 impl Snapshot {
@@ -107,18 +132,21 @@ impl Snapshot {
         commit: Option<String>,
         now: DateTime<Utc>,
     ) -> Self {
-        Self::with_parent_key(beads, ready, commit, now, None)
+        Self::build(beads, ready, commit, now, &Arc::default())
     }
 
-    /// As `new`, resolving each bead's parent from the metadata value at
-    /// `parent_key` (a dot-separated path) when it has no parent-child
-    /// dependency. The value names the parent by id or external reference.
-    pub fn with_parent_key(
+    /// Builds a snapshot: marks what `bd ready` listed, resolves each bead's
+    /// parent from the profile's `[parent]` source when it has no
+    /// parent-child dependency (the value names the parent by id or external
+    /// reference), applies the profile (`derived`), and counts history over
+    /// items. A bead in a state with `overrides_ready`, and any row that is
+    /// not an item, is never ready.
+    pub fn build(
         mut beads: Vec<Bead>,
         ready: Vec<String>,
         commit: Option<String>,
         now: DateTime<Utc>,
-        parent_key: Option<&str>,
+        profile: &Arc<Profile>,
     ) -> Self {
         let ready_set: HashSet<&str> = ready.iter().map(String::as_str).collect();
         for bead in &mut beads {
@@ -129,22 +157,21 @@ impl Snapshot {
             .enumerate()
             .map(|(i, b)| (b.id.clone(), i))
             .collect();
+        let mut by_ref: HashMap<String, usize> = HashMap::new();
+        for (i, b) in beads.iter().enumerate() {
+            if !b.external_ref.is_empty() {
+                by_ref.entry(b.external_ref.clone()).or_insert(i);
+            }
+        }
+        let parent_key = profile.parent.as_ref().map(|p| &p.path);
         if let Some(key) = parent_key {
-            let by_ref: HashMap<&str, &str> = beads
-                .iter()
-                .filter(|b| !b.external_ref.is_empty())
-                .map(|b| (b.external_ref.as_str(), b.id.as_str()))
-                .collect();
             let parents: Vec<Option<String>> = beads
                 .iter()
                 .map(|b| {
-                    let named = metadata_str(&b.metadata, key)?;
-                    let id = if index.contains_key(named) {
-                        named
-                    } else {
-                        by_ref.get(named)?
-                    };
-                    (id != b.id).then(|| id.to_string())
+                    let named = key.text(b)?;
+                    let i = index.get(&named).or_else(|| by_ref.get(&named))?;
+                    let id = &beads[*i].id;
+                    (*id != b.id).then(|| id.clone())
                 })
                 .collect();
             for (bead, parent) in beads.iter_mut().zip(parents) {
@@ -156,23 +183,51 @@ impl Snapshot {
             let (a, b) = (&beads[a], &beads[b]);
             (a.priority, &a.created_at, &a.id).cmp(&(b.priority, &b.created_at, &b.id))
         });
-        let history = history(&beads, now);
-        // Keep bd's order, dropping any id the export did not include.
-        let ready = ready
-            .into_iter()
-            .filter(|id| index.contains_key(id))
-            .collect();
-        Self {
+        let mut snapshot = Self {
             generated_at: now.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
             source: String::new(),
-            parent_key: parent_key.map(String::from),
+            parent_key: parent_key.map(|k| k.to_string()),
             commit,
             beads,
             index,
+            by_ref,
             order,
-            ready,
-            history,
+            ready: Vec::new(),
+            history: History::default(),
+            derived: Derived::default(),
+        };
+        let derived = Derived::build(&snapshot, profile, now);
+        for (i, bead) in snapshot.beads.iter_mut().enumerate() {
+            let row = &derived.rows[i];
+            let held = row
+                .states
+                .iter()
+                .any(|k| profile.state(k).is_some_and(|s| s.overrides_ready));
+            if held || !derived.is_item(i) {
+                bead.ready = false;
+            }
         }
+        let items: Vec<Bead> = snapshot
+            .beads
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| derived.is_item(*i))
+            .map(|(_, b)| b.clone())
+            .collect();
+        snapshot.history = history(&items, now);
+        // Keep bd's order, dropping any id the export did not include and
+        // any bead the profile says is not ready.
+        snapshot.ready = ready
+            .into_iter()
+            .filter(|id| snapshot.get(id).is_some_and(|b| b.ready))
+            .collect();
+        snapshot.derived = derived;
+        snapshot
+    }
+
+    /// A bead's index in `beads` (and in `derived.rows`).
+    pub fn position(&self, id: &str) -> Option<usize> {
+        self.index.get(id).copied()
     }
 
     pub fn get(&self, id: &str) -> Option<&Bead> {
@@ -181,10 +236,6 @@ impl Snapshot {
 
     pub fn ordered(&self) -> impl Iterator<Item = &Bead> {
         self.order.iter().map(|&i| &self.beads[i])
-    }
-
-    pub fn count(&self, predicate: impl Fn(&Bead) -> bool) -> usize {
-        self.beads.iter().filter(|b| predicate(b)).count()
     }
 
     pub fn children(&self, id: &str) -> Vec<&Bead> {
@@ -206,11 +257,8 @@ impl Snapshot {
 
     /// A bead by id, or by its external reference when nothing has that id.
     pub fn find(&self, key: &str) -> Option<&Bead> {
-        self.get(key).or_else(|| {
-            self.beads
-                .iter()
-                .find(|b| !b.external_ref.is_empty() && b.external_ref == key)
-        })
+        self.get(key)
+            .or_else(|| self.by_ref.get(key).map(|&i| &self.beads[i]))
     }
 }
 
@@ -402,11 +450,17 @@ struct IdRow {
     id: String,
 }
 
-pub async fn load(reader: &Reader, parent_key: Option<&str>) -> Result<Snapshot, String> {
+/// The query of the full list read. Gate-type issues are left out of the
+/// list API unless asked for; `bd export` includes them already.
+pub const LIST_QUERY: &str = "all=true&include_gates=true";
+
+/// Reads the store and builds a snapshot with `profile` off the async
+/// threads (the derivation walks every bead).
+pub async fn load(reader: &Reader, profile: Arc<Profile>) -> Result<Snapshot, String> {
     let (beads, ready, commit) = match reader {
         Reader::Api { api, local } => {
             let (beads, ready, commit) = tokio::join!(
-                api.list::<Bead>("/v0/beads/issues", "all=true"),
+                api.list::<Bead>("/v0/beads/issues", LIST_QUERY),
                 api.list::<IdRow>("/v0/beads/ready", "brief=true"),
                 async {
                     match local {
@@ -426,8 +480,13 @@ pub async fn load(reader: &Reader, parent_key: Option<&str>) -> Result<Snapshot,
             (parse_export(&export?)?, parse_ready(&ready?)?, commit)
         }
     };
-    let mut snapshot = Snapshot::with_parent_key(beads, ready, commit, Utc::now(), parent_key);
-    snapshot.source = reader.describe();
+    let source = reader.describe();
+    let mut snapshot = tokio::task::spawn_blocking(move || {
+        Snapshot::build(beads, ready, commit, Utc::now(), &profile)
+    })
+    .await
+    .map_err(|e| format!("building the snapshot failed: {e}"))?;
+    snapshot.source = source;
     Ok(snapshot)
 }
 
@@ -543,13 +602,12 @@ mod tests {
         let mut unknown = bead("fx-4", "open", "2026-10-01T00:00:00Z", None);
         unknown.metadata = serde_json::json!({"tracker": {"fields": {"parent": "EPIC-404"}}});
         let beads = vec![epic, by_ref, by_id, native, unknown];
-        let s = Snapshot::with_parent_key(
-            beads.clone(),
-            vec![],
-            None,
-            Utc::now(),
-            Some("tracker.fields.parent"),
-        );
+        let s = Snapshot::build(beads.clone(), vec![], None, Utc::now(), &{
+            let mut p = Profile::default();
+            p.set_parent_key(Some("tracker.fields.parent")).unwrap();
+            Arc::new(p)
+        });
+        assert_eq!(s.parent_key.as_deref(), Some("tracker.fields.parent"));
         let children: Vec<_> = s.children("fx-e").iter().map(|b| b.id.as_str()).collect();
         assert_eq!(children, ["fx-1", "fx-2"]);
         assert_eq!(
@@ -573,5 +631,15 @@ mod tests {
         assert_eq!(s.find("TICKET-12").unwrap().id, "fx-9");
         assert_eq!(s.find("fx-9").unwrap().id, "fx-9");
         assert!(s.find("").is_none());
+    }
+
+    #[test]
+    fn the_list_read_asks_for_gates_and_comments_parse() {
+        assert!(LIST_QUERY.split('&').any(|p| p == "include_gates=true"));
+        let text = r#"{"_type":"issue","id":"g-1","title":"Gate","status":"open","issue_type":"gate","started_at":"2026-11-15T10:00:00Z","comment_count":1,"comments":[{"id":"c1","issue_id":"g-1","author":"alice","text":"hello","created_at":"2026-11-15T10:01:00Z"}]}"#;
+        let beads = parse_export(text).unwrap();
+        assert_eq!(beads[0].comments[0].author.as_deref(), Some("alice"));
+        assert_eq!(beads[0].comment_count, Some(1));
+        assert_eq!(beads[0].started_at.as_deref(), Some("2026-11-15T10:00:00Z"));
     }
 }

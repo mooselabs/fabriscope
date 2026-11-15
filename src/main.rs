@@ -1,40 +1,37 @@
 //! Fabriscope: view any Scrolls or Beads store in a web browser.
 
+mod app;
 mod beads;
+mod costs;
+mod filters;
+mod flow;
+mod history;
 mod model;
+mod profile;
 mod provenance;
+mod query;
 mod render;
+mod routes;
+mod runs;
 mod scrolls;
 mod scrolls_http;
 mod serve;
+mod sweep;
+#[cfg(test)]
+mod testing;
 mod tools;
 mod update;
+mod web;
 
-use axum::{
-    Router,
-    extract::{Path, Query, State},
-    http::{HeaderValue, StatusCode, header},
-    middleware::{self, Next},
-    response::{
-        Html, IntoResponse, Response, Sse,
-        sse::{Event, KeepAlive},
-    },
-    routing::get,
-};
-use model::{BeadFilter, Feed, ScrollFilter, View};
-use std::{
-    convert::Infallible,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
-use tokio::sync::{RwLock, Semaphore, watch};
-use tokio_stream::{StreamExt, wrappers::WatchStream};
+use app::{App, in_progress, watch_beads, watch_scrolls};
+use model::{Feed, View};
+use routes::router;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tools::Tool;
 
 const USAGE: &str = "Usage: fabriscope [--beads DIR | --beads-url URL] [--scrolls STORE | --scrolls-url URL] [options]
        fabriscope update
+       fabriscope profile check FILE
 
 View a Beads store, a Scrolls store, or both, in a web browser. Release
 builds update themselves in the background; `fabriscope update` updates now.
@@ -44,7 +41,12 @@ builds update themselves in the background; `fabriscope update` updates now.
   --beads-url URL      A `bd serve` that is already running
   --beads-token-file F Bearer token file for that `bd serve`
   --parent-key PATH    Metadata path naming a bead's parent (by id or external
-                       reference), for stores without parent-child links
+                       reference), for stores without parent-child links;
+                       wins over the profile's [parent]
+  --profile FILE       A fabriscope.profile.v1 file saying how the store uses
+                       its metadata (see docs/profile.md)
+  --runs URL|DIR       A run feed (runfeed.v1, see docs/runfeed-v1.md)
+  --runs-token-file F  Bearer token file for a --runs URL
   --scrolls STORE      Start private scrolls serve for this store
   --scrolls-url URL    Attach to an existing loopback scrolls serve
   --bind ADDR          Address to listen on (default 127.0.0.1:8787)
@@ -55,124 +57,6 @@ builds update themselves in the background; `fabriscope update` updates now.
   --no-update          Do not check for a new release (or set FABRISCOPE_NO_UPDATE=1)
   -V, --version        Show the version
   -h, --help           Show this help";
-
-#[derive(Clone)]
-struct App {
-    view: Arc<RwLock<View>>,
-    updates: watch::Sender<u64>,
-    /// A newer release installed on disk by the background update check.
-    installed: Arc<Mutex<Option<String>>>,
-    /// Reads provenance logs, when a local `bd` can.
-    provenance: Option<Arc<Reads>>,
-}
-
-/// The local `bd` and how many provenance reads may run at once. Each read
-/// is its own `bd` process, which can take seconds against a remote server.
-struct Reads {
-    tool: Tool,
-    permits: Semaphore,
-}
-
-/// Beads whose provenance is read ahead of any visit: the ones in progress.
-const AHEAD: usize = 100;
-
-impl App {
-    fn new(view: View) -> Self {
-        let (updates, _) = watch::channel(view.revision);
-        Self {
-            view: Arc::new(RwLock::new(view)),
-            updates,
-            installed: Arc::default(),
-            provenance: None,
-        }
-    }
-
-    fn with_provenance(mut self, tool: Tool) -> Self {
-        self.provenance = Some(Arc::new(Reads {
-            tool,
-            permits: Semaphore::new(4),
-        }));
-        self
-    }
-
-    /// Starts a background read of each named bead's provenance log that is
-    /// missing or stale. Pages render the last read straight away; a read
-    /// that changes what they show bumps the revision, and they refresh.
-    async fn want_provenance(&self, ids: Vec<String>) {
-        let Some(reads) = &self.provenance else {
-            return;
-        };
-        let now = chrono::Utc::now();
-        let mut started = Vec::new();
-        {
-            let mut view = self.view.write().await;
-            let View {
-                beads, provenance, ..
-            } = &mut *view;
-            let (Some(feed), Some(store)) = (beads.as_ref(), provenance.as_mut()) else {
-                return;
-            };
-            for id in ids {
-                if let Some(bead) = feed.data.get(&id) {
-                    if store.wants_read(bead, now) {
-                        store.reading.insert(id.clone());
-                        started.push((id, bead.updated_at.clone()));
-                    }
-                }
-            }
-        }
-        for (id, updated_at) in started {
-            tokio::spawn(read_provenance(self.clone(), reads.clone(), id, updated_at));
-        }
-    }
-
-    async fn update(&self, change: impl FnOnce(&mut View)) {
-        let mut view = self.view.write().await;
-        change(&mut view);
-        view.revision += 1;
-        self.updates.send_replace(view.revision);
-    }
-}
-
-async fn read_provenance(app: App, reads: Arc<Reads>, id: String, updated_at: Option<String>) {
-    let result = match reads.permits.acquire().await {
-        // `--` ends bd's options, so no id is read as one.
-        Ok(_permit) => tools::run(
-            &reads.tool,
-            &["provenance", "log", "--json", "--", &id],
-            120,
-        )
-        .await
-        .and_then(|text| provenance::parse(&text)),
-        Err(_) => Err("provenance reads stopped".into()),
-    };
-    let mut view = app.view.write().await;
-    let Some(store) = view.provenance.as_mut() else {
-        return;
-    };
-    if store.record(&id, result, updated_at, chrono::Utc::now()) {
-        view.revision += 1;
-        app.updates.send_replace(view.revision);
-    }
-}
-
-/// The beads to read provenance for ahead of a visit: those in progress.
-fn in_progress(snapshot: &beads::Snapshot) -> Vec<String> {
-    snapshot
-        .ordered()
-        .filter(|b| b.status == "in_progress")
-        .take(AHEAD)
-        .map(|b| b.id.clone())
-        .collect()
-}
-
-async fn view_in_progress(app: &App) -> Vec<String> {
-    let view = app.view.read().await;
-    view.beads
-        .as_ref()
-        .map(|f| in_progress(&f.data))
-        .unwrap_or_default()
-}
 
 #[derive(Debug, Default, PartialEq)]
 struct Config {
@@ -192,6 +76,11 @@ struct Config {
     version: bool,
     /// `fabriscope update`: install a newer release now and exit.
     update: bool,
+    profile: Option<PathBuf>,
+    runs: Option<String>,
+    runs_token_file: Option<PathBuf>,
+    /// `fabriscope profile check FILE`: validate, print and exit.
+    profile_check: Option<PathBuf>,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> {
@@ -204,6 +93,16 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
         }
         config.update = true;
         return Ok(config);
+    }
+    if args.peek().map(String::as_str) == Some("profile") {
+        args.next();
+        return match (args.next().as_deref(), args.next(), args.next()) {
+            (Some("check"), Some(file), None) => {
+                config.profile_check = Some(file.into());
+                Ok(config)
+            }
+            _ => Err("use: fabriscope profile check FILE".into()),
+        };
     }
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value"));
@@ -227,6 +126,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
             "--bd" => config.bd = Some(value("--bd")?.into()),
             "--scrolls-bin" => config.scrolls_bin = Some(value("--scrolls-bin")?.into()),
             "--scrolls-dolt" => config.scrolls_dolt = Some(value("--scrolls-dolt")?.into()),
+            "--profile" => config.profile = Some(value("--profile")?.into()),
+            "--runs" => config.runs = Some(value("--runs")?),
+            "--runs-token-file" => {
+                config.runs_token_file = Some(value("--runs-token-file")?.into())
+            }
             "--no-update" => config.no_update = true,
             "--help" | "-h" => config.help = true,
             "--version" | "-V" => config.version = true,
@@ -312,265 +216,6 @@ fn scrolls_tool(config: &Config, store: &std::path::Path) -> Tool {
     }
 }
 
-/// Re-reads Beads when its change signal moves. A commit is a reliable
-/// signal, so a timed re-read is only a slow safety net; API stats are a
-/// hint, so the timer is shorter; with no signal at all, re-read every 30s.
-async fn watch_beads(
-    app: App,
-    reader: beads::Reader,
-    parent_key: Option<String>,
-    mut last: Option<String>,
-) {
-    let mut refreshed = Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let probe = reader.probe().await;
-        let due = match &probe {
-            Some((signal, strong)) => {
-                let every = Duration::from_secs(if *strong { 300 } else { 60 });
-                last.as_ref() != Some(signal) || refreshed.elapsed() >= every
-            }
-            None => refreshed.elapsed() >= Duration::from_secs(30),
-        };
-        if !due {
-            continue;
-        }
-        // The signal is taken before the read, so a change during the read
-        // shows up as a new signal next time round.
-        last = probe.map(|(signal, _)| signal);
-        let result = beads::load(&reader, parent_key.as_deref()).await;
-        refreshed = Instant::now();
-        let ahead = result.as_ref().map(in_progress).unwrap_or_default();
-        app.update(|view| {
-            if let Some(feed) = view.beads.as_mut() {
-                match result {
-                    Ok(snapshot) => {
-                        *feed = Feed {
-                            data: Arc::new(snapshot),
-                            error: None,
-                        }
-                    }
-                    Err(error) => {
-                        feed.error = Some(format!(
-                            "Beads read failed; showing the last good read. {error}"
-                        ))
-                    }
-                }
-            }
-        })
-        .await;
-        app.want_provenance(ahead).await;
-    }
-}
-
-/// Single-flight conditional refresh, with the delay measured after completion.
-async fn watch_scrolls(app: App, mut api: scrolls_http::Api) {
-    loop {
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        refresh_scrolls(&app, &mut api).await;
-    }
-}
-
-async fn refresh_scrolls(app: &App, api: &mut scrolls_http::Api) {
-    let result = api.refresh().await;
-    let mut view = app.view.write().await;
-    let Some(feed) = view.scrolls.as_mut() else {
-        return;
-    };
-    let changed = match result {
-        Ok(snapshot) => {
-            let recovered = feed.error.take().is_some();
-            let changed = snapshot.is_some() || recovered;
-            if let Some(snapshot) = snapshot {
-                feed.data = Arc::new(snapshot);
-            }
-            view.scrolls_checked_at = Some(chrono::Utc::now().to_rfc3339());
-            changed
-        }
-        Err(error) => {
-            let error = format!("Scrolls read failed; showing the last good read. {error}");
-            let changed = feed.error.as_ref() != Some(&error);
-            feed.error = Some(error);
-            changed
-        }
-    };
-    if changed {
-        view.revision += 1;
-        app.updates.send_replace(view.revision);
-    }
-}
-
-async fn overview(State(app): State<App>) -> Html<String> {
-    app.want_provenance(view_in_progress(&app).await).await;
-    Html(render::overview(&*app.view.read().await))
-}
-
-async fn beads_page(State(app): State<App>, Query(filter): Query<BeadFilter>) -> Response {
-    let view = app.view.read().await;
-    if view.beads.is_none() {
-        return (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response();
-    }
-    Html(render::beads(&view, &filter)).into_response()
-}
-
-async fn epics_page(State(app): State<App>, Query(filter): Query<BeadFilter>) -> Response {
-    let view = app.view.read().await;
-    if view.beads.is_none() {
-        return (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response();
-    }
-    Html(render::epics(&view, &filter)).into_response()
-}
-
-async fn scrolls_page(State(app): State<App>, Query(filter): Query<ScrollFilter>) -> Response {
-    let view = app.view.read().await;
-    if view.scrolls.is_none() {
-        return (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response();
-    }
-    Html(render::scrolls(&view, &filter)).into_response()
-}
-
-async fn bead_page(State(app): State<App>, Path(id): Path<String>) -> Response {
-    app.want_provenance(vec![id.clone()]).await;
-    let view = app.view.read().await;
-    match render::bead(&view, &id) {
-        Some(page) => Html(page).into_response(),
-        None => (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response(),
-    }
-}
-
-async fn scroll_page(State(app): State<App>, Path(id): Path<String>) -> Response {
-    let view = app.view.read().await;
-    match render::scroll(&view, &id) {
-        Some(page) => Html(page).into_response(),
-        None => (StatusCode::NOT_FOUND, Html(render::not_found(&view))).into_response(),
-    }
-}
-
-async fn health(State(app): State<App>) -> Response {
-    let view = app.view.read().await;
-    let status = if view.errors().is_empty() {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
-    let beads = view.beads.as_ref().map(|f| {
-        serde_json::json!({
-            "read_at": f.data.generated_at,
-            "source": f.data.source,
-            "commit": f.data.commit,
-            "beads": f.data.beads.len(),
-            "ready": f.data.ready.len(),
-            "error": f.error,
-        })
-    });
-    let scrolls = view.scrolls.as_ref().map(|f| {
-        serde_json::json!({
-            "read_at": f.data.generated_at,
-            "revision": f.data.revision,
-            "source": f.data.source,
-            "store_id": f.data.store_id,
-            "branch": f.data.branch,
-            "schema_revision": f.data.schema_revision,
-            "last_successful_check": view.scrolls_checked_at,
-            "scrolls": f.data.scrolls.len(),
-            "edges": f.data.edges.len(),
-            "error": f.error,
-        })
-    });
-    let provenance = view.provenance.as_ref().map(|p| {
-        serde_json::json!({
-            "read": p.trails.len(),
-            "reading": p.reading.len(),
-            "failed": p.trails.values().filter(|t| t.error.is_some()).count(),
-        })
-    });
-    let update = app
-        .installed
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|v| serde_json::json!({ "installed": v }));
-    (
-        status,
-        axum::Json(serde_json::json!({
-            "version": update::VERSION,
-            "update": update,
-            "revision": view.revision,
-            "beads": beads,
-            "provenance": provenance,
-            "scrolls": scrolls,
-        })),
-    )
-        .into_response()
-}
-
-async fn events(State(app): State<App>) -> impl IntoResponse {
-    let stream = WatchStream::new(app.updates.subscribe())
-        .map(|revision| Ok::<_, Infallible>(Event::default().data(revision.to_string())));
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
-
-async fn headers(request: axum::extract::Request, next: Next) -> Response {
-    let mut response = next.run(request).await;
-    let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"),
-    );
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert(
-        header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
-    );
-    response
-}
-
-fn router(app: App) -> Router {
-    Router::new()
-        .route("/", get(overview))
-        .route("/beads", get(beads_page))
-        .route("/epics", get(epics_page))
-        .route("/bead/{id}", get(bead_page))
-        .route("/scrolls", get(scrolls_page))
-        .route("/scroll/{id}", get(scroll_page))
-        .route("/events", get(events))
-        .route("/healthz", get(health))
-        .route(
-            "/app.css",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-                    include_str!("../static/app.css"),
-                )
-            }),
-        )
-        .route(
-            "/app.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../static/app.js"),
-                )
-            }),
-        )
-        .route(
-            "/theme.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("../static/theme.js"),
-                )
-            }),
-        )
-        .fallback(|| async { (StatusCode::NOT_FOUND, "Not found") })
-        .layer(middleware::from_fn(headers))
-        .with_state(app)
-}
-
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
@@ -591,6 +236,26 @@ async fn run() -> Result<(), String> {
     }
     if config.update {
         return update_now().await;
+    }
+    if let Some(file) = &config.profile_check {
+        let profile = profile::Profile::load(file)?;
+        println!("{}: a valid {} profile", file.display(), profile::SCHEMA);
+        println!("{}", profile.describe());
+        return Ok(());
+    }
+    let mut profile = match &config.profile {
+        Some(file) => profile::Profile::load(file)?,
+        None => profile::Profile::default(),
+    };
+    profile.set_parent_key(config.parent_key.as_deref())?;
+    let profile = Arc::new(profile);
+    let runs_source = config
+        .runs
+        .as_deref()
+        .map(|r| runs::Source::parse(r, config.runs_token_file.clone()))
+        .transpose()?;
+    if runs_source.is_none() && config.runs_token_file.is_some() {
+        return Err("--runs-token-file needs --runs URL".into());
     }
     let beads_reader = beads_reader(&config).await?;
     let scrolls_store = config
@@ -614,9 +279,7 @@ async fn run() -> Result<(), String> {
     let (beads, scrolls) = tokio::join!(
         async {
             match &beads_reader {
-                Some(reader) => beads::load(reader, config.parent_key.as_deref())
-                    .await
-                    .map(Some),
+                Some(reader) => beads::load(reader, profile.clone()).await.map(Some),
                 None => Ok(None),
             }
         },
@@ -651,6 +314,30 @@ async fn run() -> Result<(), String> {
     let scrolls_checked_at = scrolls.as_ref().map(|s| s.generated_at.clone());
     let provenance_tool = beads_reader.as_ref().and_then(|r| r.local()).cloned();
     let ahead = beads.as_ref().map(in_progress).unwrap_or_default();
+    // A directory feed is read once here so pages have it from the start;
+    // `runs::client` (WP5) keeps it current. A feed that cannot be read is
+    // shown as an error, not refused: it may not be published yet.
+    let runs = match &runs_source {
+        Some(dir @ runs::Source::Dir(_)) => {
+            let source = dir.clone();
+            let read = tokio::task::spawn_blocking(move || runs::load(&source))
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r);
+            Some(match read {
+                Ok(index) => Feed {
+                    data: Arc::new(index),
+                    error: None,
+                },
+                Err(error) => Feed {
+                    data: Arc::default(),
+                    error: Some(format!("Run feed read failed. {error}")),
+                },
+            })
+        }
+        Some(runs::Source::Url { .. }) => Some(Feed::default()),
+        None => None,
+    };
     let mut app = App::new(View {
         title,
         beads: beads.map(|data| Feed {
@@ -666,7 +353,12 @@ async fn run() -> Result<(), String> {
             .as_ref()
             .map(|_| provenance::Store::default()),
         revision: 1,
+        history: beads_reader.as_ref().map(|_| history::Store::default()),
+        runs,
+        profile,
+        run_cache: Arc::default(),
     });
+    let provenance_ready = provenance_tool.is_some();
     if let Some(tool) = provenance_tool {
         app = app.with_provenance(tool);
     }
@@ -685,13 +377,15 @@ async fn run() -> Result<(), String> {
     let address = listener.local_addr().map_err(|e| e.to_string())?;
     println!("Fabriscope: http://{address}{summary}");
     app.want_provenance(ahead).await;
+    if provenance_ready {
+        sweep::spawn(app.clone());
+    }
     if let Some(reader) = beads_reader {
-        tokio::spawn(watch_beads(
-            app.clone(),
-            reader,
-            config.parent_key.clone(),
-            first_signal,
-        ));
+        history::reader::spawn(app.clone(), &reader);
+        tokio::spawn(watch_beads(app.clone(), reader, first_signal));
+    }
+    if let Some(source) = runs_source {
+        runs::client::spawn(app.clone(), source);
     }
     let scrolls_watch = scrolls_api
         .as_ref()
@@ -751,7 +445,6 @@ async fn update_now() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower::ServiceExt;
 
     fn args(list: &[&str]) -> Result<Config, String> {
         parse_args(list.iter().map(|s| s.to_string()))
@@ -777,6 +470,18 @@ mod tests {
         assert!(args(&["--frobnicate"]).is_err());
         assert!(args(&["--scrolls-url", "http://127.0.0.1:9"]).is_ok());
         assert!(args(&["--scrolls", "/tmp", "--scrolls-url", "http://127.0.0.1:9"]).is_err());
+    }
+
+    #[test]
+    fn profile_and_runs_flags_and_the_profile_check_command() {
+        let config = args(&["--beads", "/tmp", "--profile", "p.toml", "--runs", "feed"]).unwrap();
+        assert_eq!(config.profile, Some("p.toml".into()));
+        assert_eq!(config.runs.as_deref(), Some("feed"));
+        let check = args(&["profile", "check", "p.toml"]).unwrap();
+        assert_eq!(check.profile_check, Some("p.toml".into()));
+        assert!(args(&["profile", "check"]).is_err());
+        assert!(args(&["profile", "lint", "p.toml"]).is_err());
+        assert!(args(&["profile", "check", "a", "b"]).is_err());
     }
 
     #[test]
@@ -806,71 +511,5 @@ mod tests {
             tool.args,
             ["--store", "/work/project/.scrolls", "--dolt", "/opt/dolt"]
         );
-    }
-
-    async fn get(app: &App, path: &str) -> (StatusCode, axum::http::HeaderMap, String) {
-        let response = router(app.clone())
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri(path)
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = response.status();
-        let headers = response.headers().clone();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        (status, headers, String::from_utf8_lossy(&body).into_owned())
-    }
-
-    #[tokio::test]
-    async fn only_known_routes_are_served_and_every_response_is_guarded() {
-        let app = App::new(View {
-            beads: Some(Feed::default()),
-            ..Default::default()
-        });
-        for (path, status) in [
-            ("/", 200),
-            ("/beads", 200),
-            ("/epics", 200),
-            ("/scrolls", 404),
-            ("/bead/no-such-id", 404),
-            ("/scroll/no-such-id", 404),
-            ("/healthz", 200),
-            ("/app.css", 200),
-            ("/app.js", 200),
-            ("/theme.js", 200),
-            ("/.git/config", 404),
-            ("/../.secret-test", 404),
-        ] {
-            let (actual, headers, _) = get(&app, path).await;
-            assert_eq!(actual.as_u16(), status, "{path}");
-            assert!(headers.contains_key("content-security-policy"), "{path}");
-        }
-    }
-
-    #[tokio::test]
-    async fn healthz_reports_each_store_and_turns_unhealthy_on_error() {
-        let app = App::new(View {
-            beads: Some(Feed::default()),
-            ..Default::default()
-        });
-        let (status, _, body) = get(&app, "/healthz").await;
-        assert_eq!(status, StatusCode::OK);
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(json["beads"]["beads"], 0);
-        assert!(json["scrolls"].is_null());
-        assert_eq!(json["version"], update::VERSION);
-        assert!(json["update"].is_null());
-        app.update(|view| view.beads.as_mut().unwrap().error = Some("bd unreachable".into()))
-            .await;
-        let (status, _, body) = get(&app, "/healthz").await;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-        assert!(body.contains("bd unreachable"));
-        let (_, _, page) = get(&app, "/").await;
-        assert!(page.contains("bd unreachable"));
     }
 }

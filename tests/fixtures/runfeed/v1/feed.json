@@ -1,0 +1,24 @@
+{
+  "schema": "runfeed.v1",
+  "producer": {
+    "name": "demo-exporter",
+    "version": "1.0.0",
+    "commit": "16e4ee44775ce889d3a994f817d8fad6d6f6dc48"
+  },
+  "factory": "demo",
+  "revision": 42,
+  "generated_at": "2026-11-15T12:00:00Z",
+  "index": "index.json",
+  "shards": [
+    "index/2026-10.json"
+  ],
+  "source_health": {
+    "at": "2026-11-15T11:59:30Z",
+    "cursor": "events:18342",
+    "gaps": []
+  },
+  "boards": {
+    "daily-report": "boards/daily-report.json",
+    "stop-ratio": "boards/stop-ratio.json"
+  }
+}

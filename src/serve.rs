@@ -162,17 +162,22 @@ impl Api {
 
     /// Every item of a list operation. Asks for one unlimited page, and pages
     /// with the cursor when the server refuses unlimited reads (a server
-    /// bound beyond loopback does).
+    /// bound beyond loopback does) or the unlimited answer does not arrive
+    /// whole. Over a slow link `bd serve` closes a large response part way
+    /// (seen at 65 MB through an ssh tunnel), and pages of 500 get through.
     pub async fn list<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
         query: &str,
     ) -> Result<Vec<T>, String> {
         let unlimited = format!("{path}?{query}&limit=0");
-        match self.get(&unlimited, 300).await? {
-            Ok(body) => return parse_page::<T>(&body, path).map(|p| p.items),
-            Err(p) if p.status == 400 && p.param == "limit" => {}
-            Err(p) => return Err(format!("bd serve GET {unlimited}: {p}")),
+        match self.get(&unlimited, 300).await {
+            Ok(Ok(body)) => return parse_page::<T>(&body, path).map(|p| p.items),
+            Ok(Err(p)) if p.status == 400 && p.param == "limit" => {}
+            Ok(Err(p)) => return Err(format!("bd serve GET {unlimited}: {p}")),
+            // The server was never reached: paging would only fail again.
+            Err(e) if e.contains("cannot reach bd serve") => return Err(e),
+            Err(_) => {}
         }
         let mut items = Vec::new();
         let mut cursor: Option<String> = None;

@@ -1,0 +1,59 @@
+{
+  "schema": "runfeed.run.v1",
+  "run": "run-0005",
+  "refs": {
+    "attempt": "att-0005-1"
+  },
+  "subject": {
+    "ref": "WORK-0005",
+    "title": "Document the export format"
+  },
+  "group": {
+    "rig": "alpha",
+    "repository": "acme/widgets"
+  },
+  "state": "passed",
+  "started_at": "2026-10-03T09:00:00Z",
+  "ended_at": "2026-10-03T13:00:00Z",
+  "updated_at": "2026-10-03T13:05:00Z",
+  "attempts": [
+    {
+      "id": "att-0005-1",
+      "number": 1,
+      "state": "passed",
+      "steps": [],
+      "facts": [],
+      "links": []
+    }
+  ],
+  "costs": {
+    "usd": 3.1,
+    "complete": false,
+    "gaps": [
+      "by-model-not-retained"
+    ]
+  },
+  "outcome": {
+    "facts": [
+      {
+        "key": "outcome",
+        "value": "landed",
+        "type": "text",
+        "tone": "good"
+      }
+    ]
+  },
+  "links": [
+    {
+      "rel": "pull_request",
+      "href": "https://example.com/acme/widgets/pull/31",
+      "text": "#31"
+    }
+  ],
+  "documents": [],
+  "facts": [],
+  "gaps": [
+    "steps-not-retained"
+  ],
+  "digest": "90fe741589614f98de1b30d43af79c4241d6657d86f2c5cb46330391021fc531"
+}

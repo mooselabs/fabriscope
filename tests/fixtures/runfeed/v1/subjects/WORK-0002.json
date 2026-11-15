@@ -1,0 +1,24 @@
+{
+  "schema": "runfeed.subject.v1",
+  "subject": {
+    "ref": "WORK-0002",
+    "id": "item-7f3a",
+    "title": "Fix rounding in invoice totals"
+  },
+  "runs": [
+    {
+      "run": "run-0002",
+      "attempt": "att-0002-2",
+      "state": "passed",
+      "started_at": "2026-11-14T08:00:00Z",
+      "href": "runs/run-0002.json"
+    },
+    {
+      "run": "run-0004",
+      "attempt": "att-0004-1",
+      "state": "superseded",
+      "started_at": "2026-10-28T09:00:00Z",
+      "href": "runs/run-0004.json"
+    }
+  ]
+}

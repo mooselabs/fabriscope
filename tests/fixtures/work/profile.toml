@@ -1,0 +1,222 @@
+# A profile for the neutral work-ledger fixture. It exercises every section
+# of fabriscope.profile.v1; docs/profile.md explains each key.
+schema = "fabriscope.profile.v1"
+name = "Work ledger (fixture)"
+
+[parent]
+path = "work.fields.parent_epic"
+
+[documents]
+base_path = "work.path"
+
+# Row classes: first match wins; anything else is an item.
+[[rows]]
+class = "hidden"
+when = { type = "work-state" }
+
+[[rows]]
+class = "hidden"
+when = { label = "work:coordination" }
+
+[[rows]]
+class = "receipt"
+when = { type = "work-receipt" }
+
+[[kinds]]
+key = "gate"
+label = "Gate"
+when = { eq = { "work.fields.gate" = "true" } }
+
+[[kinds]]
+key = "packet"
+label = "Packet"
+when = { type = "task", has = "work.fields.write_scope" }
+
+[[kinds]]
+key = "decision"
+label = "Decision"
+when = { type = "decision" }
+
+[[kinds]]
+key = "epic"
+label = "Epic"
+when = { type = "epic" }
+
+[[kinds]]
+key = "milestone"
+label = "Milestone"
+when = { type = "milestone" }
+
+[[states]]
+key = "held"
+label = "Held"
+tone = "bad"
+when = { status = "open", has = "work.suspended" }
+since = "work.suspended.at"
+read_ahead = true
+overrides_ready = true
+facts = ["work.suspended.stop_code", "work.suspended.cause", "work.suspended.attempt", "work.suspended.policy"]
+banner = "Held since {work.suspended.at}: {work.suspended.stop_code} ({work.suspended.cause})"
+
+[[states]]
+key = "working"
+label = "Working"
+tone = "good"
+when = { status = "in_progress" }
+since = "field:started_at"
+read_ahead = true
+
+[[states]]
+key = "overdue"
+label = "Overdue"
+tone = "warn"
+when = { type = "decision", not = { status = "closed" }, past = "work.fields.due" }
+since = "work.fields.due"
+
+[[groups]]
+key = "milestone"
+label = "Milestone"
+from = "work.fields.milestone"
+subgroup = "work.fields.lane"
+declared = "work.fields.lanes"
+
+[[groups]]
+key = "rig"
+label = "Rig"
+from = ["seat:3", "work.suspended.rig"]
+
+[[groups]]
+key = "area"
+label = "Area"
+from = "label:area:"
+
+[people]
+segments = 1
+
+[[people.roles]]
+key = "claimant"
+label = "Claimed by"
+from = ["work.fields.claimed_by", "field:assignee", "event:claim"]
+
+[[people.roles]]
+key = "creator"
+label = "Created by"
+from = ["field:created_by", "event:authored"]
+
+[[people.roles]]
+key = "asked"
+label = "Asked of"
+from = "work.fields.asked_of"
+
+[[people.classes]]
+prefix = "factory/"
+class = "seat"
+segments = 3
+
+[[panels]]
+key = "packet"
+title = "Packet"
+when = { has = "work.fields.write_scope" }
+fields = [
+  { path = "work.fields.timebox", label = "Timebox", kind = "duration" },
+  { path = "work.fields.spend_cap", label = "Spend cap", kind = "money" },
+  { path = "work.fields.write_scope", label = "Write scope", kind = "list" },
+  { path = "work.fields.validation", label = "Validation", kind = "list" },
+  { path = "work.fields.related", label = "Related", kind = "id-ref" },
+  { path = "work.fields.evidence", label = "Evidence", kind = "link" },
+  { path = "work.fields.review", label = "Review", kind = "enum-badge" },
+  { path = "work.fields.gate", label = "Gate", kind = "bool" },
+  { path = "work.fields.claimed_by", label = "Claimed by", kind = "person" },
+  { path = "work.fields.claimed_at", label = "Claimed at", kind = "timestamp" },
+  { path = "work.fields.notes_md", label = "Notes", kind = "markdown" },
+  { path = "work.fields", label = "All fields", kind = "json" },
+]
+
+[[panels]]
+key = "decision"
+title = "Decision"
+when = { type = "decision" }
+fields = [
+  { path = "work.fields.asked_of", label = "Asked of", kind = "person" },
+  { path = "work.fields.due", label = "Due", kind = "text" },
+  { path = "work.fields.options", label = "Options", kind = "list" },
+]
+
+[events]
+marker = "work.event.v1"
+schema = { key = "schema", equals = "work.event.v1" }
+kind = "kind"
+at = "at"
+actor = "actor"
+order = ["ledger_revision", "position"]
+changes = "changes"
+notes = ["notes", "reason"]
+
+[events.kinds]
+authored = { label = "Created", created = true }
+claim = { label = "Claimed", tone = "good", claim = true }
+suspended = { label = "Held", tone = "bad", stop = true }
+completion = { label = "Completed", tone = "good" }
+
+[[receipts]]
+when = { label = "rcpt:gate" }
+kind = "gate"
+group = { result = "work.receipt.result", rig = "work.receipt.rig" }
+at = "work.receipt.at"
+actor = "work.receipt.actor"
+subject = "work.receipt.subject"
+attempt = "work.receipt.attempt"
+fields = [{ path = "work.receipt.seconds", label = "Gate time", kind = "duration" }]
+
+[[receipts]]
+when = { label = "rcpt:ship" }
+kind = "ship"
+group = { result = "work.receipt.result", rig = "work.receipt.rig" }
+at = "work.receipt.at"
+actor = "work.receipt.actor"
+subject = "work.receipt.subject"
+attempt = "work.receipt.attempt"
+fields = [{ path = "work.receipt.commit", label = "Merged as", kind = "code", repo = "widgets" }]
+
+[[receipts]]
+when = { type = "work-receipt" }
+kind = "operation"
+group = { status = "result.status" }
+at = "field:created_at"
+subject = ["result.id", "result.bead_id"]
+fields = [{ path = "result.operation_id", label = "Operation", kind = "code" }]
+
+[links]
+repos = { widgets = "https://example.com/acme/widgets" }
+commit = "{repo}/commit/{value}"
+pull_request = "{repo}/pull/{value}"
+tree = "{repo}/tree/{value}"
+
+[[links.ids]]
+prefix = "WORK-"
+target = "bead"
+
+[[links.ids]]
+prefix = "Q-"
+target = "bead"
+
+[[links.ids]]
+prefix = "ADR-"
+target = "template"
+template = "https://example.com/adr/{value}"
+
+[flow]
+claim_at = ["work.fields.claimed_at", "field:started_at", "event:claim"]
+claimant = ["work.fields.claimed_by", "event:claim"]
+items = { type = ["task", "gate"] }
+wip_status = ["in_progress"]
+
+[flow.decisions]
+when = { type = "decision", not = { status = "closed" } }
+since = "field:created_at"
+assignee = "work.fields.asked_of"
+due = "work.fields.due"
+
+[labels]
+"acme.gate_seconds" = "Gate time"
+"tests.failed" = "Tests failed"

@@ -1,4 +1,8 @@
-use crate::{beads, provenance, scrolls};
+//! The view every page renders: the last good read of each store, the
+//! profile, and what background reads have gathered.
+
+use crate::profile::{Profile, RowFacts};
+use crate::{beads, history, provenance, runs, scrolls};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -21,63 +25,107 @@ pub struct View {
     pub provenance: Option<provenance::Store>,
     /// Bumped on changed content or health; open pages reload when it changes.
     pub revision: u64,
+    /// The profile in use (the generic one without `--profile`).
+    pub profile: Arc<Profile>,
+    /// History threads read so far, when a Beads store is shown.
+    pub history: Option<history::Store>,
+    /// The run feed index, when `--runs` is given.
+    pub runs: Option<Feed<runs::Index>>,
+    /// Run docs and document pages, fetched on demand.
+    pub run_cache: Arc<runs::cache::Cache>,
 }
 
 impl View {
+    /// Every store's last read error, for the alert banner and /healthz.
     pub fn errors(&self) -> Vec<&str> {
         let beads = self.beads.as_ref().and_then(|f| f.error.as_deref());
         let scrolls = self.scrolls.as_ref().and_then(|f| f.error.as_deref());
-        beads.into_iter().chain(scrolls).collect()
+        let runs = self.runs.as_ref().and_then(|f| f.error.as_deref());
+        beads.into_iter().chain(scrolls).chain(runs).collect()
+    }
+
+    /// The Beads snapshot, when a Beads store is shown.
+    pub fn snapshot(&self) -> Option<&beads::Snapshot> {
+        self.beads.as_ref().map(|f| &*f.data)
+    }
+
+    /// The profile's facts about bead `index` of the snapshot.
+    pub fn row(&self, index: usize) -> Option<&RowFacts> {
+        self.snapshot()?.derived.rows.get(index)
+    }
+
+    /// The profile's facts about a bead, by id.
+    pub fn facts(&self, id: &str) -> Option<&RowFacts> {
+        let s = self.snapshot()?;
+        s.derived.rows.get(s.position(id)?)
+    }
+
+    /// Group key → value → bead indexes (items only).
+    pub fn group_index(
+        &self,
+    ) -> Option<&std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<usize>>>>
+    {
+        self.snapshot().map(|s| &s.derived.groups)
+    }
+
+    /// A bead's history thread, once read.
+    pub fn thread(&self, id: &str) -> Option<&history::Thread> {
+        self.history.as_ref()?.get(id)
+    }
+
+    /// A bead's provenance trail, once read (and when a local `bd` can).
+    pub fn trail(&self, id: &str) -> Option<&provenance::Trail> {
+        self.provenance.as_ref()?.get(id)
+    }
+
+    /// Who holds `role` for a bead: its bead-level value, else the actor of
+    /// the first history event an `event:<kind>` source names.
+    pub fn person_in_role(&self, id: &str, role: &str) -> Option<String> {
+        if let Some(name) = self.facts(id).and_then(|r| r.people.get(role)) {
+            return Some(name.clone());
+        }
+        let thread = self.thread(id)?;
+        self.profile
+            .role(role)?
+            .from
+            .iter()
+            .find_map(|source| match source {
+                crate::profile::Source::Event(kind) => {
+                    thread.actor(kind).map(|a| self.profile.person(a).name)
+                }
+                _ => None,
+            })
+    }
+
+    /// The run index, when one has been read.
+    pub fn run_index(&self) -> Option<&runs::Index> {
+        self.runs.as_ref().map(|f| &*f.data)
+    }
+
+    /// Runs whose subject is this bead (by external ref or id), newest
+    /// first.
+    pub fn runs_for(&self, bead: &beads::Bead) -> Vec<&runs::RunSummary> {
+        self.run_index()
+            .map(|i| i.for_bead(bead))
+            .unwrap_or_default()
+    }
+
+    /// Runs for a subject ref (or subject id).
+    pub fn runs_for_subject(&self, key: &str) -> Vec<&runs::RunSummary> {
+        self.run_index()
+            .map(|i| i.by_subject(key))
+            .unwrap_or_default()
+    }
+
+    /// The run an attempt id belongs to.
+    pub fn run_for_attempt(&self, attempt: &str) -> Option<&runs::RunSummary> {
+        self.run_index()?.by_attempt(attempt)
     }
 }
 
 fn contains(haystack: &[&str], needle: &str) -> bool {
     let needle = needle.to_lowercase();
     haystack.iter().any(|h| h.to_lowercase().contains(&needle))
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default)]
-pub struct BeadFilter {
-    pub q: String,
-    pub state: String,
-    #[serde(rename = "type")]
-    pub issue_type: String,
-    pub priority: String,
-    /// `yes` for beads `bd ready` lists, `no` for the rest, empty for any.
-    pub ready: String,
-    pub page: usize,
-}
-
-impl BeadFilter {
-    /// `state` is a status exactly as stored, `all`, or empty for every bead
-    /// that is not closed.
-    pub fn matches(&self, bead: &beads::Bead) -> bool {
-        let state = match self.state.as_str() {
-            "" => !bead.is_closed(),
-            "all" => true,
-            status => bead.status == status,
-        };
-        let ready = match self.ready.as_str() {
-            "yes" => bead.ready,
-            "no" => !bead.ready,
-            _ => true,
-        };
-        state
-            && ready
-            && (self.issue_type.is_empty() || bead.issue_type == self.issue_type)
-            && (self.priority.is_empty() || bead.priority.to_string() == self.priority)
-            && (self.q.is_empty()
-                || contains(
-                    &[
-                        &bead.id,
-                        &bead.title,
-                        &bead.external_ref,
-                        &bead.labels.join(" "),
-                    ],
-                    &self.q,
-                ))
-    }
 }
 
 #[derive(Default, Deserialize)]
@@ -109,72 +157,6 @@ impl ScrollFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bead_filter_defaults_to_beads_not_closed() {
-        let open = beads::Bead {
-            id: "fx-1".into(),
-            title: "Fix login".into(),
-            status: "open".into(),
-            issue_type: "bug".into(),
-            priority: 1,
-            ..Default::default()
-        };
-        let closed = beads::Bead {
-            id: "fx-2".into(),
-            status: "closed".into(),
-            ..Default::default()
-        };
-        let all = BeadFilter {
-            state: "all".into(),
-            ..Default::default()
-        };
-        assert!(BeadFilter::default().matches(&open));
-        assert!(!BeadFilter::default().matches(&closed));
-        assert!(all.matches(&closed));
-        // A status filter compares with the stored status, so `open` means
-        // status open, not "anything not closed".
-        let status = |state: &str| BeadFilter {
-            state: state.into(),
-            ..Default::default()
-        };
-        assert!(status("open").matches(&open));
-        assert!(!status("open").matches(&closed));
-        assert!(status("closed").matches(&closed));
-        assert!(!status("in_progress").matches(&open));
-        let ready = |ready: &str| BeadFilter {
-            ready: ready.into(),
-            ..Default::default()
-        };
-        assert!(ready("no").matches(&open));
-        assert!(!ready("yes").matches(&open));
-        assert!(ready("yes").matches(&beads::Bead {
-            ready: true,
-            ..open.clone()
-        }));
-        assert!(
-            BeadFilter {
-                q: "LOGIN".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
-        assert!(
-            BeadFilter {
-                issue_type: "bug".into(),
-                priority: "1".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
-        assert!(
-            !BeadFilter {
-                priority: "0".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
-    }
 
     #[test]
     fn scroll_filter_matches_kind_status_and_text() {

@@ -1,0 +1,17 @@
+{
+  "schema": "runfeed.board.v1",
+  "name": "daily-report",
+  "title": "Daily report",
+  "generated_at": "2026-11-15T06:00:00Z",
+  "body": {
+    "date": "2026-11-14",
+    "landed": [
+      "WORK-0002"
+    ],
+    "stopped": [],
+    "lines": [
+      "1 run landed.",
+      "Spend: 5.37 USD across 1 run."
+    ]
+  }
+}

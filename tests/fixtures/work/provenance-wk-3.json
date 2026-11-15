@@ -1,0 +1,6 @@
+[
+  {"id":"p3-1","issue_id":"wk-3","kind":"claim","actor":"factory/hostA/rigB","source":"fixture","occurred_at":"2026-11-15T07:00:00Z","created_at":"2026-11-15T07:00:00Z","payload":"{\"generation\":1,\"rig\":\"rigB\"}"},
+  {"id":"p3-2","issue_id":"wk-3","kind":"cut","actor":"factory/hostA/rigB","source":"fixture","occurred_at":"2026-11-15T07:01:00Z","created_at":"2026-11-15T07:01:00Z","payload":"{\"formula\":\"build\"}","ref":"att-0003-1","ref_kind":"work-id"},
+  {"id":"p3-3","issue_id":"wk-3","kind":"used","actor":"factory/hostA/rigB","source":"fixture","occurred_at":"2026-11-15T09:14:00Z","created_at":"2026-11-15T09:14:00Z","payload":"{\"dollars\":0.88,\"tokens\":410000,\"wall_seconds\":8040}","ref":"att-0003-1","ref_kind":"work-id"},
+  {"id":"p3-4","issue_id":"wk-3","kind":"suspend","actor":"factory/hostA/rigB","source":"fixture","occurred_at":"2026-11-15T09:15:00Z","created_at":"2026-11-15T09:15:00Z","payload":"{\"attempt\":\"att-0003-1\",\"cause\":\"scope\",\"stop_code\":\"scope-exceeded\"}"}
+]

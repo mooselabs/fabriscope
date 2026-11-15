@@ -420,6 +420,22 @@ summary>span:last-child {
   flex:1;
   min-width:180px;
 }
+.filters .more-filters {
+  flex-basis:100%;
+  color:var(--muted);
+  font-size:12px;
+}
+.filters .more-filters summary {
+  cursor:pointer;
+  width:max-content;
+}
+.filters .filters-more {
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+  align-items:end;
+  margin-top:12px;
+}
 input,select,button {
   font:inherit;
   font-size:14px;
@@ -619,6 +635,20 @@ figure {
   width:100%;
   height:auto;
   min-height:130px;
+}
+/* Row charts are as tall as their rows; a floor would centre one bar in
+   empty space. */
+.chart.hbars,.chart.ranges {
+  min-height:0;
+}
+/* Row charts keep readable labels on a phone and scroll in their figure. */
+figure:has(> .chart.hbars),figure:has(> .chart.ranges) {
+  overflow-x:auto;
+}
+@media(max-width:700px) {
+  .chart.hbars,.chart.ranges {
+    min-width:900px;
+  }
 }
 .chart text {
   fill:var(--muted);
@@ -953,4 +983,201 @@ aside code {
     border-left:0;
     padding-left:0;
   }
+}
+/* Shared by the ledger views (F2): navigation, tones, facts, banners,
+   timelines, data tables and chart marks. Area files add only their own. */
+header nav {
+  flex-wrap:wrap;
+  row-gap:4px;
+}
+.site-search input {
+  height:36px;
+  width:180px;
+  max-width:100%;
+  font-size:13px;
+  padding:6px 10px;
+}
+.subnav {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 20px;
+  padding:10px max(24px,calc((100vw - 1280px)/2));
+  background:var(--paper);
+  border-bottom:1px solid var(--line);
+  font-size:13px;
+}
+.subnav a {
+  color:var(--muted);
+  padding:4px 0;
+}
+.subnav a[aria-current] {
+  color:var(--ink);
+  box-shadow:0 2px var(--blue);
+}
+.badge.good {
+  color:var(--badge-green);
+  background:var(--badge-green-bg);
+}
+.badge.warn {
+  color:var(--badge-amber);
+  background:var(--badge-amber-bg);
+}
+.badge.bad {
+  color:var(--red-ink);
+  background:var(--red-bg);
+}
+.tone-good {
+  color:var(--green);
+}
+.tone-warn,.tone-waiting {
+  color:var(--amber);
+}
+.tone-bad {
+  color:var(--red);
+}
+.tone-neutral {
+  color:var(--muted);
+}
+dl.facts {
+  display:grid;
+  grid-template-columns:minmax(110px,max-content) minmax(0,1fr);
+  gap:6px 16px;
+  margin:0 0 16px;
+  font-size:14px;
+}
+dl.facts dt {
+  color:var(--muted);
+}
+dl.facts dd {
+  margin:0;
+  overflow-wrap:anywhere;
+}
+.banner {
+  border-left:3px solid var(--line);
+  background:var(--table-head);
+  padding:14px 18px;
+  border-radius:4px;
+  margin:0 0 20px;
+}
+.banner.bad {
+  background:var(--red-bg);
+  color:var(--red-ink);
+  border-color:var(--red);
+}
+.banner.warn,.banner.waiting {
+  background:var(--badge-amber-bg);
+  color:var(--badge-amber);
+  border-color:var(--amber);
+}
+.banner.good {
+  background:var(--badge-green-bg);
+  color:var(--badge-green);
+  border-color:var(--green);
+}
+.banner pre,.banner code {
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+}
+ol.timeline {
+  list-style:none;
+  margin:0;
+  padding:0 0 0 18px;
+  border-left:2px solid var(--line);
+}
+ol.timeline > li {
+  position:relative;
+  padding:0 0 14px 6px;
+  font-size:14px;
+  overflow-wrap:anywhere;
+}
+ol.timeline > li::before {
+  content:"";
+  position:absolute;
+  left:-25px;
+  top:5px;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:var(--line);
+}
+ol.timeline > li.good::before {
+  background:var(--green);
+}
+ol.timeline > li.bad::before {
+  background:var(--red);
+}
+ol.timeline > li.warn::before,ol.timeline > li.waiting::before {
+  background:var(--amber);
+}
+ol.timeline small {
+  display:block;
+  color:var(--muted);
+}
+table.data td.num,table.data th.num {
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+/* Break a long word only when it cannot fit: a table keeps whole words and
+   scrolls inside its .table-wrap instead of splitting "implementer". */
+table.data td {
+  overflow-wrap:break-word;
+}
+ul.values {
+  margin:0;
+  padding-left:18px;
+}
+pre.json {
+  max-height:320px;
+  overflow:auto;
+  font-size:12px;
+}
+.chart .bar {
+  fill:var(--badge-neutral);
+}
+.chart .bar.tone-good,.chart .bar.series-0 {
+  fill:var(--green);
+}
+.chart .bar.tone-warn,.chart .bar.tone-waiting,.chart .bar.series-1 {
+  fill:var(--amber);
+}
+.chart .bar.tone-bad {
+  fill:var(--red);
+}
+.chart .bar.series-2 {
+  fill:var(--blue);
+}
+.chart .range {
+  stroke:var(--blue);
+  stroke-width:6;
+  stroke-linecap:round;
+}
+@media(max-width:700px) {
+  .site-search {
+    order:2;
+  }
+  .site-search input {
+    width:140px;
+  }
+  .subnav {
+    padding:8px 18px;
+  }
+}
+/* A group value or other short fact beside a row (bead tables, runs, the
+   bead header). Long values are cut with an ellipsis; the title has them. */
+.chip {
+  display:inline-block;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:1px 8px;
+  margin:1px 0;
+  font-size:12px;
+  background:var(--badge-neutral-bg);
+  white-space:nowrap;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.chip a {
+  color:var(--badge-neutral);
 }

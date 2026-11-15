@@ -1,0 +1,16 @@
+{
+  "schema": "runfeed.subject.v1",
+  "subject": {
+    "ref": "WORK-0003",
+    "title": "Move reports to the new table"
+  },
+  "runs": [
+    {
+      "run": "run-0003",
+      "attempt": "att-0003-1",
+      "state": "stopped",
+      "started_at": "2026-11-15T07:00:00Z",
+      "href": "runs/run-0003.json"
+    }
+  ]
+}
