@@ -1,0 +1,455 @@
+{
+  "schema": "runfeed.run.v1",
+  "run": "run-0002",
+  "refs": {
+    "attempt": "att-0002-2",
+    "contract": "ctr-0002",
+    "branch": "work/WORK-0002-rounding",
+    "commit": "9eedcb590af984bdf4520a8939840bd61d4979fe",
+    "tree": "e9e83fd20809ef695d3056dda5bc16804003bcc4"
+  },
+  "subject": {
+    "ref": "WORK-0002",
+    "id": "item-7f3a",
+    "title": "Fix rounding in invoice totals"
+  },
+  "group": {
+    "rig": "alpha",
+    "repository": "acme/widgets"
+  },
+  "state": "passed",
+  "started_at": "2026-11-14T08:00:00Z",
+  "ended_at": "2026-11-14T15:30:00Z",
+  "updated_at": "2026-11-14T15:31:00Z",
+  "attempts": [
+    {
+      "id": "att-0002-1",
+      "number": 1,
+      "state": "failed",
+      "started_at": "2026-11-14T08:00:00Z",
+      "ended_at": "2026-11-14T10:40:00Z",
+      "steps": [
+        {
+          "id": "s-0002-context-1",
+          "kind": "context",
+          "state": "done",
+          "result": "pass",
+          "seconds": 120,
+          "session": "ses-0002-a",
+          "started_at": "2026-11-14T08:00:00Z",
+          "ended_at": "2026-11-14T08:02:00Z",
+          "facts": [],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0002-implement-1",
+          "kind": "implement",
+          "iteration": 1,
+          "state": "done",
+          "result": "pass",
+          "seconds": 7800,
+          "session": "ses-0002-a",
+          "started_at": "2026-11-14T08:02:00Z",
+          "ended_at": "2026-11-14T10:12:00Z",
+          "facts": [],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0002-gate-1",
+          "kind": "gate",
+          "label": "Gate",
+          "iteration": 1,
+          "state": "done",
+          "result": "fail",
+          "seconds": 380,
+          "started_at": "2026-11-14T10:33:40Z",
+          "ended_at": "2026-11-14T10:40:00Z",
+          "failure": {
+            "code": "tests-failed",
+            "text": "2 of 148 tests failed"
+          },
+          "facts": [
+            {
+              "key": "acme.gate_seconds",
+              "value": 380,
+              "type": "seconds"
+            },
+            {
+              "key": "tests.failed",
+              "value": 2,
+              "type": "count",
+              "tone": "bad"
+            }
+          ],
+          "links": [],
+          "documents": [
+            "gate-log"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "key": "acme.retry_reason",
+          "value": "gate-failed",
+          "type": "text",
+          "label": "Retried because"
+        }
+      ],
+      "costs": {
+        "usd": 2.1,
+        "complete": true,
+        "gaps": []
+      },
+      "links": []
+    },
+    {
+      "id": "att-0002-2",
+      "number": 2,
+      "state": "passed",
+      "started_at": "2026-11-14T11:00:00Z",
+      "ended_at": "2026-11-14T15:30:00Z",
+      "steps": [
+        {
+          "id": "s-0002-implement-2",
+          "kind": "implement",
+          "iteration": 2,
+          "state": "done",
+          "result": "pass",
+          "seconds": 6300,
+          "session": "ses-0002-b",
+          "started_at": "2026-11-14T11:00:00Z",
+          "ended_at": "2026-11-14T12:45:00Z",
+          "facts": [],
+          "links": [],
+          "documents": [
+            "transcript"
+          ]
+        },
+        {
+          "id": "s-0002-gate-2",
+          "kind": "gate",
+          "label": "Gate",
+          "iteration": 2,
+          "state": "done",
+          "result": "pass",
+          "seconds": 412,
+          "started_at": "2026-11-14T12:50:00Z",
+          "ended_at": "2026-11-14T12:56:52Z",
+          "facts": [
+            {
+              "key": "acme.gate_seconds",
+              "value": 412,
+              "type": "seconds"
+            },
+            {
+              "key": "tests.passed",
+              "value": 148,
+              "type": "count",
+              "tone": "good"
+            }
+          ],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0002-review-1",
+          "kind": "review",
+          "state": "done",
+          "result": "pass",
+          "result_detail": "approve",
+          "seconds": 640,
+          "session": "ses-0002-c",
+          "started_at": "2026-11-14T13:00:00Z",
+          "ended_at": "2026-11-14T13:10:40Z",
+          "facts": [
+            {
+              "key": "review.findings",
+              "value": 0,
+              "type": "count"
+            }
+          ],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0002-publish-1",
+          "kind": "publish",
+          "state": "done",
+          "result": "pass",
+          "seconds": 30,
+          "started_at": "2026-11-14T13:11:00Z",
+          "ended_at": "2026-11-14T13:11:30Z",
+          "facts": [],
+          "links": [
+            {
+              "rel": "pull_request",
+              "href": "https://example.com/acme/widgets/pull/42",
+              "ref": "42",
+              "text": "#42"
+            }
+          ],
+          "documents": []
+        },
+        {
+          "id": "s-0002-ci-1",
+          "kind": "ci",
+          "state": "done",
+          "result": "pass",
+          "seconds": 7200,
+          "started_at": "2026-11-14T13:12:00Z",
+          "ended_at": "2026-11-14T15:12:00Z",
+          "facts": [],
+          "links": [
+            {
+              "rel": "ci",
+              "href": "https://example.com/acme/widgets/actions/runs/9001",
+              "text": "CI run 9001"
+            }
+          ],
+          "documents": []
+        },
+        {
+          "id": "s-0002-ship-1",
+          "kind": "ship",
+          "state": "done",
+          "result": "pass",
+          "seconds": 60,
+          "started_at": "2026-11-14T15:29:00Z",
+          "ended_at": "2026-11-14T15:30:00Z",
+          "facts": [
+            {
+              "key": "ship.commit",
+              "value": "9eedcb590af984bdf4520a8939840bd61d4979fe",
+              "type": "sha",
+              "label": "Merged as",
+              "ref": {
+                "kind": "commit",
+                "id": "9eedcb590af984bdf4520a8939840bd61d4979fe"
+              }
+            }
+          ],
+          "links": [
+            {
+              "rel": "commit",
+              "href": "https://example.com/acme/widgets/commit/9eedcb590af984bdf4520a8939840bd61d4979fe",
+              "ref": "9eedcb590af984bdf4520a8939840bd61d4979fe"
+            }
+          ],
+          "documents": []
+        }
+      ],
+      "facts": [],
+      "costs": {
+        "usd": 3.27,
+        "complete": true,
+        "gaps": []
+      },
+      "links": [
+        {
+          "rel": "pull_request",
+          "href": "https://example.com/acme/widgets/pull/42",
+          "text": "#42"
+        }
+      ]
+    }
+  ],
+  "costs": {
+    "usd": 5.37,
+    "usd_with_overhead": 6.02,
+    "tokens": {
+      "input": 1840000,
+      "output": 92000,
+      "cache_read": 1200000,
+      "cache_write": 64000
+    },
+    "by_model": {
+      "model-large": {
+        "usd": 4.81,
+        "tokens": {
+          "input": 1500000,
+          "output": 80000,
+          "cache_read": 1000000,
+          "cache_write": 60000
+        }
+      },
+      "model-small": {
+        "usd": 0.56,
+        "tokens": {
+          "input": 340000,
+          "output": 12000,
+          "cache_read": 200000,
+          "cache_write": 4000
+        }
+      }
+    },
+    "by_role": {
+      "implementer": {
+        "usd": 3.9
+      },
+      "reviewer": {
+        "usd": 0.91
+      },
+      "gate": {
+        "usd": 0.56
+      }
+    },
+    "complete": true,
+    "gaps": []
+  },
+  "roles": {
+    "implementer": {
+      "model": "model-large",
+      "provider": "provider-a"
+    },
+    "reviewer": {
+      "model": "model-large",
+      "provider": "provider-a"
+    },
+    "gate": {
+      "model": "model-small",
+      "provider": "provider-b"
+    }
+  },
+  "timing": {
+    "wall_hours": 7.5,
+    "active_hours": 5.2,
+    "timebox": "M",
+    "timebox_hours_max": 4,
+    "over_timebox": true
+  },
+  "sessions": [
+    {
+      "id": "ses-0002-a",
+      "provider": "provider-a",
+      "model": "model-large",
+      "started_at": "2026-11-14T08:00:00Z"
+    },
+    {
+      "id": "ses-0002-b",
+      "provider": "provider-a",
+      "model": "model-large",
+      "started_at": "2026-11-14T11:00:00Z"
+    },
+    {
+      "id": "ses-0002-c",
+      "provider": "provider-a",
+      "model": "model-large",
+      "started_at": "2026-11-14T13:00:00Z"
+    }
+  ],
+  "outcome": {
+    "facts": [
+      {
+        "key": "outcome",
+        "value": "landed",
+        "type": "text",
+        "tone": "good"
+      },
+      {
+        "key": "merge.commit",
+        "value": "9eedcb590af984bdf4520a8939840bd61d4979fe",
+        "type": "sha",
+        "ref": {
+          "kind": "commit",
+          "id": "9eedcb590af984bdf4520a8939840bd61d4979fe"
+        }
+      },
+      {
+        "key": "acme.stop_free",
+        "value": true,
+        "type": "bool",
+        "label": "Landed without a stop",
+        "tone": "good"
+      }
+    ]
+  },
+  "links": [
+    {
+      "rel": "item",
+      "ref": "WORK-0002",
+      "text": "WORK-0002"
+    },
+    {
+      "rel": "pull_request",
+      "href": "https://example.com/acme/widgets/pull/42",
+      "ref": "42",
+      "text": "#42"
+    },
+    {
+      "rel": "commit",
+      "href": "https://example.com/acme/widgets/commit/9eedcb590af984bdf4520a8939840bd61d4979fe",
+      "ref": "9eedcb590af984bdf4520a8939840bd61d4979fe"
+    },
+    {
+      "rel": "tree",
+      "ref": "e9e83fd20809ef695d3056dda5bc16804003bcc4"
+    }
+  ],
+  "documents": [
+    {
+      "id": "transcript",
+      "kind": "transcript",
+      "title": "Implementer transcript (attempt 2)",
+      "content_type": "application/x-ndjson",
+      "bytes": 1658,
+      "pages": [
+        {
+          "href": "docs/run-0002/transcript/0001.ndjson",
+          "bytes": 912,
+          "first_at": "2026-11-14T11:00:05Z",
+          "last_at": "2026-11-14T11:00:32Z"
+        },
+        {
+          "href": "docs/run-0002/transcript/0002.ndjson",
+          "bytes": 746,
+          "first_at": "2026-11-14T12:41:10Z",
+          "last_at": "2026-11-14T12:43:00Z"
+        }
+      ],
+      "state": "ready",
+      "source": {
+        "kind": "session-log",
+        "digest": "3e2dc940918de8c85576ae336d1e9caa8e634182e1f5cc45229b7ac99307e0b0"
+      },
+      "redaction": {
+        "policy": "credentials-v1",
+        "replaced": 1
+      }
+    },
+    {
+      "id": "gate-log",
+      "kind": "log",
+      "title": "Gate log (attempt 1)",
+      "content_type": "text/plain",
+      "bytes": 220,
+      "pages": [
+        {
+          "href": "docs/run-0002/gate-log/0001.txt",
+          "bytes": 220
+        }
+      ],
+      "state": "ready",
+      "redaction": {
+        "policy": "credentials-v1",
+        "replaced": 0
+      }
+    }
+  ],
+  "facts": [
+    {
+      "key": "diff.files_changed",
+      "value": 3,
+      "type": "count",
+      "label": "Files changed"
+    },
+    {
+      "key": "diff.lines_added",
+      "value": 58,
+      "type": "count"
+    }
+  ],
+  "gaps": [],
+  "digest": "91e4e0fdc43a654d0e52c6c900a55ad7926a01a6043069ef7366ff01a9ddc3eb"
+}

@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Run feed schema
+        run: python3 tests/runfeed_schema.py
       - name: Theme browser checks
         run: |
           pip install playwright==1.64.0

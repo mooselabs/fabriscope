@@ -1,0 +1,143 @@
+{
+  "schema": "runfeed.run.v1",
+  "run": "run-0001",
+  "refs": {
+    "attempt": "att-0001-1",
+    "contract": "ctr-0001",
+    "branch": "work/WORK-0001-csv-export"
+  },
+  "subject": {
+    "ref": "WORK-0001",
+    "title": "Add CSV export to the orders page"
+  },
+  "group": {
+    "rig": "alpha",
+    "repository": "acme/widgets"
+  },
+  "state": "running",
+  "current_step": "s-0001-gate-1",
+  "started_at": "2026-11-15T10:00:00Z",
+  "updated_at": "2026-11-15T11:58:00Z",
+  "attempts": [
+    {
+      "id": "att-0001-1",
+      "number": 1,
+      "state": "running",
+      "started_at": "2026-11-15T10:00:00Z",
+      "steps": [
+        {
+          "id": "s-0001-context-1",
+          "kind": "context",
+          "name": "Read the contract",
+          "state": "done",
+          "result": "pass",
+          "started_at": "2026-11-15T10:00:00Z",
+          "ended_at": "2026-11-15T10:01:35Z",
+          "seconds": 95,
+          "session": "ses-0001-a",
+          "facts": [],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0001-implement-1",
+          "kind": "implement",
+          "iteration": 1,
+          "state": "done",
+          "result": "pass",
+          "started_at": "2026-11-15T10:01:35Z",
+          "ended_at": "2026-11-15T11:23:35Z",
+          "seconds": 4920,
+          "session": "ses-0001-a",
+          "facts": [
+            {
+              "key": "diff.files_changed",
+              "value": 7,
+              "type": "count",
+              "label": "Files changed"
+            }
+          ],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0001-gate-1",
+          "kind": "gate",
+          "label": "Gate",
+          "iteration": 1,
+          "state": "running",
+          "result": "running",
+          "started_at": "2026-11-15T11:53:00Z",
+          "facts": [
+            {
+              "key": "acme.gate_seconds",
+              "value": 300,
+              "type": "seconds"
+            }
+          ],
+          "links": [],
+          "documents": []
+        }
+      ],
+      "facts": [],
+      "links": [
+        {
+          "rel": "branch",
+          "ref": "work/WORK-0001-csv-export"
+        }
+      ]
+    }
+  ],
+  "costs": {
+    "usd": 1.42,
+    "tokens": {
+      "input": 512000,
+      "output": 21000
+    },
+    "complete": false,
+    "gaps": [
+      "run-in-progress"
+    ]
+  },
+  "roles": {
+    "implementer": {
+      "model": "model-large",
+      "provider": "provider-a"
+    }
+  },
+  "timing": {
+    "wall_hours": 1.97,
+    "active_hours": 1.6,
+    "timebox": "M",
+    "timebox_hours_max": 4,
+    "over_timebox": false
+  },
+  "sessions": [
+    {
+      "id": "ses-0001-a",
+      "provider": "provider-a",
+      "model": "model-large",
+      "started_at": "2026-11-15T10:00:00Z"
+    }
+  ],
+  "links": [
+    {
+      "rel": "item",
+      "ref": "WORK-0001",
+      "text": "WORK-0001"
+    }
+  ],
+  "documents": [
+    {
+      "id": "transcript",
+      "kind": "transcript",
+      "title": "Implementer transcript",
+      "content_type": "application/x-ndjson",
+      "pages": [],
+      "state": "pending"
+    }
+  ],
+  "facts": [],
+  "gaps": [],
+  "digest": "c9b06bf95e8bdede67e7a2a5a710f7871f60c824fdfb4240d6fe53b732e55319"
+}

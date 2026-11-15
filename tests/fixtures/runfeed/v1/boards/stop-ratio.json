@@ -1,0 +1,17 @@
+{
+  "schema": "runfeed.board.v1",
+  "name": "stop-ratio",
+  "title": "Stops per merge",
+  "source_schema": "acme.stop_ratio.v2",
+  "generated_at": "2026-11-15T11:59:00Z",
+  "body": {
+    "window_days": 7,
+    "merges": 12,
+    "stops": 3,
+    "stops_per_merge": 0.25,
+    "by_class": {
+      "contract": 2,
+      "gate": 1
+    }
+  }
+}

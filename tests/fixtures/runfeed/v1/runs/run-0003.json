@@ -1,0 +1,163 @@
+{
+  "schema": "runfeed.run.v1",
+  "run": "run-0003",
+  "refs": {
+    "attempt": "att-0003-1",
+    "contract": "ctr-0003",
+    "branch": "work/WORK-0003-reports-table"
+  },
+  "subject": {
+    "ref": "WORK-0003",
+    "title": "Move reports to the new table"
+  },
+  "group": {
+    "rig": "beta",
+    "repository": "acme/reports"
+  },
+  "state": "stopped",
+  "started_at": "2026-11-15T07:00:00Z",
+  "ended_at": "2026-11-15T09:15:00Z",
+  "updated_at": "2026-11-15T09:20:00Z",
+  "attempts": [
+    {
+      "id": "att-0003-1",
+      "number": 1,
+      "state": "stopped",
+      "started_at": "2026-11-15T07:00:00Z",
+      "ended_at": "2026-11-15T09:15:00Z",
+      "steps": [
+        {
+          "id": "s-0003-context-1",
+          "kind": "context",
+          "state": "done",
+          "result": "pass",
+          "seconds": 80,
+          "session": "ses-0003-a",
+          "started_at": "2026-11-15T07:00:00Z",
+          "ended_at": "2026-11-15T07:01:20Z",
+          "facts": [],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0003-implement-1",
+          "kind": "implement",
+          "iteration": 1,
+          "state": "done",
+          "result": "fail",
+          "seconds": 8000,
+          "session": "ses-0003-a",
+          "started_at": "2026-11-15T07:01:20Z",
+          "ended_at": "2026-11-15T09:14:40Z",
+          "failure": {
+            "code": "write-scope",
+            "text": "The change needs migrations/0042_reports.sql, outside the write scope."
+          },
+          "facts": [],
+          "links": [],
+          "documents": [
+            "transcript",
+            "scope-check"
+          ]
+        }
+      ],
+      "facts": [],
+      "links": [],
+      "stop": {
+        "code": "scope-exceeded",
+        "at": "2026-11-15T09:15:00Z"
+      }
+    }
+  ],
+  "costs": {
+    "usd": 0.88,
+    "complete": false,
+    "gaps": [
+      "usage-missing:ses-0003-a"
+    ]
+  },
+  "roles": {
+    "implementer": {
+      "model": "model-large",
+      "provider": "provider-a"
+    }
+  },
+  "sessions": [
+    {
+      "id": "ses-0003-a",
+      "provider": "provider-a",
+      "model": "model-large",
+      "started_at": "2026-11-15T07:00:00Z"
+    }
+  ],
+  "stop": {
+    "code": "scope-exceeded",
+    "cause": "write-scope",
+    "class": "contract",
+    "title": "The change needs a file outside its write scope",
+    "why": "The migration the change depends on lives outside the paths the contract allows.",
+    "detail": [
+      "Needed: migrations/0042_reports.sql",
+      "Allowed: src/reports/**"
+    ],
+    "next": "Widen the write scope, or cut the migration into its own item.",
+    "commands": [
+      "workctl edit WORK-0003 --add-scope \"migrations/**\"",
+      "workctl release WORK-0003"
+    ],
+    "owner_ask": {
+      "problem": "WORK-0003 cannot land without a schema migration it is not allowed to write.",
+      "question": "Widen WORK-0003's write scope to include migrations/**?",
+      "recommended": "yes",
+      "if_yes": "The run resumes at implement with the wider scope.",
+      "if_not": "A new item is cut for the migration and WORK-0003 waits on it."
+    },
+    "at": "2026-11-15T09:15:00Z"
+  },
+  "links": [
+    {
+      "rel": "item",
+      "ref": "WORK-0003",
+      "text": "WORK-0003"
+    }
+  ],
+  "documents": [
+    {
+      "id": "transcript",
+      "kind": "transcript",
+      "title": "Implementer transcript",
+      "content_type": "application/x-ndjson",
+      "pages": [],
+      "state": "withheld",
+      "redaction": {
+        "policy": "credentials-v1",
+        "replaced": 0
+      }
+    },
+    {
+      "id": "scope-check",
+      "kind": "diagnostic",
+      "title": "Write-scope check",
+      "content_type": "application/json",
+      "bytes": 206,
+      "pages": [
+        {
+          "href": "docs/run-0003/scope-check/0001.json",
+          "bytes": 206
+        }
+      ],
+      "state": "ready"
+    }
+  ],
+  "facts": [
+    {
+      "key": "acme.scope_violations",
+      "value": 1,
+      "type": "count",
+      "tone": "bad",
+      "label": "Scope violations"
+    }
+  ],
+  "gaps": [],
+  "digest": "6de8c03b76692faceb718a4e32a989036322632fbfbcbf5a71f95abfbb27e070"
+}

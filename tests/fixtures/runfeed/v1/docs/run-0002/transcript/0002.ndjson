@@ -1,0 +1,4 @@
+{"at": "2026-11-14T12:41:10Z", "role": "tool_call", "tool": "shell", "model": "model-large", "text": "make test"}
+{"at": "2026-11-14T12:42:02Z", "role": "tool_result", "tool": "shell", "text": "test totals::half_even_rounding ... ok\ntest totals::many_lines_sum ... ok\n148 passed, 0 failed\n"}
+{"at": "2026-11-14T12:42:30Z", "role": "assistant", "model": "model-large", "text": "One invoice note in the fixtures holds the literal text <script>alert(1)</script>; it is stored as text and must be escaped wherever it is shown."}
+{"at": "2026-11-14T12:43:00Z", "role": "assistant", "model": "model-large", "text": "Totals now round once, half-even. The API token printed by the test log was replaced with [REDACTED:credential] before publishing."}

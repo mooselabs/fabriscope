@@ -1,0 +1,13 @@
+{
+  "check": "write_scope",
+  "allowed": [
+    "src/reports/**"
+  ],
+  "touched": [
+    "src/reports/table.rs",
+    "migrations/0042_reports.sql"
+  ],
+  "outside": [
+    "migrations/0042_reports.sql"
+  ]
+}

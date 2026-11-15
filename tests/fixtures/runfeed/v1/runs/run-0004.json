@@ -1,0 +1,82 @@
+{
+  "schema": "runfeed.run.v1",
+  "run": "run-0004",
+  "refs": {
+    "attempt": "att-0004-1",
+    "contract": "ctr-0002-old",
+    "branch": "work/WORK-0002-rounding-old"
+  },
+  "subject": {
+    "ref": "WORK-0002",
+    "id": "item-7f3a",
+    "title": "Fix rounding in invoice totals"
+  },
+  "group": {
+    "rig": "alpha",
+    "repository": "acme/widgets"
+  },
+  "state": "superseded",
+  "started_at": "2026-10-28T09:00:00Z",
+  "ended_at": "2026-10-28T12:00:00Z",
+  "updated_at": "2026-10-28T12:00:00Z",
+  "attempts": [
+    {
+      "id": "att-0004-1",
+      "number": 1,
+      "state": "superseded",
+      "started_at": "2026-10-28T09:00:00Z",
+      "ended_at": "2026-10-28T12:00:00Z",
+      "steps": [
+        {
+          "id": "s-0004-context-1",
+          "kind": "context",
+          "state": "done",
+          "result": "pass",
+          "seconds": 90,
+          "started_at": "2026-10-28T09:00:00Z",
+          "ended_at": "2026-10-28T09:01:30Z",
+          "facts": [],
+          "links": [],
+          "documents": []
+        },
+        {
+          "id": "s-0004-implement-1",
+          "kind": "implement",
+          "iteration": 1,
+          "state": "done",
+          "result": "cancelled",
+          "started_at": "2026-10-28T09:01:30Z",
+          "ended_at": "2026-10-28T12:00:00Z",
+          "facts": [],
+          "links": [],
+          "documents": []
+        }
+      ],
+      "facts": [],
+      "links": []
+    }
+  ],
+  "costs": {
+    "usd": 0.64,
+    "complete": true,
+    "gaps": []
+  },
+  "links": [
+    {
+      "rel": "item",
+      "ref": "WORK-0002",
+      "text": "WORK-0002"
+    }
+  ],
+  "documents": [],
+  "facts": [
+    {
+      "key": "superseded_by",
+      "value": "ctr-0002",
+      "type": "id",
+      "label": "Superseded by contract"
+    }
+  ],
+  "gaps": [],
+  "digest": "137756b3366031b3e158616b4f0f82c68b7b78a1eafd9c13829d2c9cebe5d6a1"
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "runfeed.index.v1",
+  "revision": 30,
+  "runs": [
+    {
+      "run": "run-0004",
+      "subject": {
+        "ref": "WORK-0002",
+        "id": "item-7f3a",
+        "title": "Fix rounding in invoice totals"
+      },
+      "group": {
+        "rig": "alpha",
+        "repository": "acme/widgets"
+      },
+      "state": "superseded",
+      "started_at": "2026-10-28T09:00:00Z",
+      "ended_at": "2026-10-28T12:00:00Z",
+      "updated_at": "2026-10-28T12:00:00Z",
+      "digest": "137756b3366031b3e158616b4f0f82c68b7b78a1eafd9c13829d2c9cebe5d6a1",
+      "href": "runs/run-0004.json",
+      "cost_usd": 0.64,
+      "attempts": 1
+    },
+    {
+      "run": "run-0005",
+      "subject": {
+        "ref": "WORK-0005",
+        "title": "Document the export format"
+      },
+      "group": {
+        "rig": "alpha",
+        "repository": "acme/widgets"
+      },
+      "state": "passed",
+      "started_at": "2026-10-03T09:00:00Z",
+      "ended_at": "2026-10-03T13:00:00Z",
+      "updated_at": "2026-10-03T13:05:00Z",
+      "digest": "90fe741589614f98de1b30d43af79c4241d6657d86f2c5cb46330391021fc531",
+      "href": "runs/run-0005.json",
+      "cost_usd": 3.1,
+      "attempts": 1
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "runfeed.subject.v1",
+  "subject": {
+    "ref": "WORK-0005",
+    "title": "Document the export format"
+  },
+  "runs": [
+    {
+      "run": "run-0005",
+      "attempt": "att-0005-1",
+      "state": "passed",
+      "started_at": "2026-10-03T09:00:00Z",
+      "href": "runs/run-0005.json"
+    }
+  ]
+}
