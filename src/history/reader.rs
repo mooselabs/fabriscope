@@ -36,9 +36,9 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::io::BufRead;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::Semaphore;
 
 /// The least time between two bulk `bd export` reads.
 const BULK_EVERY: Duration = Duration::from_secs(300);
@@ -341,35 +341,22 @@ fn read_export(
 
 // --- Per-issue mode ------------------------------------------------------
 
-/// The API a per-issue store reads through, and the read permits.
-struct PerIssue {
+/// The API a per-issue store reads through, and the read permits. Held on
+/// `App::history_reads`.
+pub(crate) struct PerIssue {
     api: Api,
     permits: Semaphore,
 }
 
-/// Per-issue readers by the view they fill. `App` is shared and frozen, so
-/// the reader is found by the view's address.
-type Registry = Vec<(Weak<RwLock<View>>, Arc<PerIssue>)>;
-static PER_ISSUE: Mutex<Registry> = Mutex::new(Vec::new());
-
 fn register(app: &App, api: Api) {
-    let mut registry = PER_ISSUE.lock().unwrap();
-    registry.retain(|(view, _)| view.strong_count() > 0);
-    registry.push((
-        Arc::downgrade(&app.view),
-        Arc::new(PerIssue {
-            api,
-            permits: Semaphore::new(PER_ISSUE_PERMITS),
-        }),
-    ));
+    let _ = app.history_reads.set(Arc::new(PerIssue {
+        api,
+        permits: Semaphore::new(PER_ISSUE_PERMITS),
+    }));
 }
 
 fn per_issue(app: &App) -> Option<Arc<PerIssue>> {
-    let registry = PER_ISSUE.lock().unwrap();
-    registry
-        .iter()
-        .find(|(view, _)| std::ptr::eq(view.as_ptr(), Arc::as_ptr(&app.view)))
-        .map(|(_, reads)| reads.clone())
+    app.history_reads.get().cloned()
 }
 
 /// Ids keep `-`, `_`, `.` and `~` as they are; anything else is encoded.
@@ -433,7 +420,7 @@ async fn read_ahead(app: App) {
             let view = app.view.read().await;
             match view.beads.as_ref().map(|f| f.data.clone()) {
                 Some(s) if !last.as_ref().is_some_and(|l| Arc::ptr_eq(l, &s)) => {
-                    let ids = ahead(&view, &s);
+                    let ids = ahead(&s);
                     last = Some(s);
                     ids
                 }
@@ -450,20 +437,13 @@ async fn read_ahead(app: App) {
 }
 
 /// Items in a `read_ahead` state or in progress, in display order.
-fn ahead(view: &View, s: &Snapshot) -> Vec<String> {
-    let reads_ahead = |i: usize| {
-        s.derived.is_item(i)
-            && (s.beads[i].status == "in_progress"
-                || s.derived.rows.get(i).is_some_and(|r| {
-                    r.states
-                        .iter()
-                        .any(|k| view.profile.state(k).is_some_and(|st| st.read_ahead))
-                }))
-    };
+fn ahead(s: &Snapshot) -> Vec<String> {
     s.order
         .iter()
         .copied()
-        .filter(|&i| reads_ahead(i))
+        .filter(|&i| {
+            s.derived.reads_ahead(i) || (s.derived.is_item(i) && s.beads[i].status == "in_progress")
+        })
         .take(AHEAD)
         .map(|i| s.beads[i].id.clone())
         .collect()
@@ -578,7 +558,7 @@ mod tests {
     #[test]
     fn read_ahead_takes_held_and_working_items() {
         let view = crate::testing::work_view();
-        let ids = ahead(&view, view.snapshot().unwrap());
+        let ids = ahead(view.snapshot().unwrap());
         assert_eq!(ids.len(), 2);
         assert!(ids.contains(&"wk-1".to_string()) && ids.contains(&"wk-3".to_string()));
     }

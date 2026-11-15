@@ -102,7 +102,7 @@ fn warm_held(view: &model::View, cache: &super::cache::Cache) {
     let Some(s) = view.snapshot() else {
         return;
     };
-    for id in crate::filters::read_ahead(s, &view.profile, HELD_ITEMS) {
+    for id in crate::filters::read_ahead(s, HELD_ITEMS) {
         let Some(bead) = s.find(&id) else {
             continue;
         };

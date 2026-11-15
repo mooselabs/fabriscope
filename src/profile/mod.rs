@@ -1012,7 +1012,7 @@ mod tests {
             vec![],
             None,
             chrono::Utc::now(),
-            &Profile::default(),
+            &Default::default(),
         );
         let named = Source::parse("ref:work.parent").unwrap().bead(&child, &s);
         assert_eq!(named.unwrap().id, "wk-e");

@@ -3,8 +3,8 @@
 
 use crate::model::{Feed, View};
 use crate::tools::{self, Tool};
-use crate::{beads, provenance, scrolls_http};
-use std::sync::{Arc, Mutex};
+use crate::{beads, history, provenance, scrolls_http};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Semaphore, watch};
 
@@ -16,6 +16,10 @@ pub(crate) struct App {
     pub(crate) installed: Arc<Mutex<Option<String>>>,
     /// Reads provenance logs, when a local `bd` can.
     provenance: Option<Arc<Reads>>,
+    /// Reads history threads one issue at a time, once
+    /// `history::reader::spawn` finds a store that needs it. Shared by every
+    /// clone, so pages and the sweeper ask the same reader.
+    pub(crate) history_reads: Arc<OnceLock<Arc<history::reader::PerIssue>>>,
 }
 
 /// The local `bd` and how many provenance reads may run at once. Each read
@@ -36,6 +40,7 @@ impl App {
             updates,
             installed: Arc::default(),
             provenance: None,
+            history_reads: Arc::default(),
         }
     }
 

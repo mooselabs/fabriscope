@@ -132,7 +132,7 @@ impl Snapshot {
         commit: Option<String>,
         now: DateTime<Utc>,
     ) -> Self {
-        Self::build(beads, ready, commit, now, &Profile::default())
+        Self::build(beads, ready, commit, now, &Arc::default())
     }
 
     /// Builds a snapshot: marks what `bd ready` listed, resolves each bead's
@@ -146,7 +146,7 @@ impl Snapshot {
         ready: Vec<String>,
         commit: Option<String>,
         now: DateTime<Utc>,
-        profile: &Profile,
+        profile: &Arc<Profile>,
     ) -> Self {
         let ready_set: HashSet<&str> = ready.iter().map(String::as_str).collect();
         for bead in &mut beads {
@@ -605,7 +605,7 @@ mod tests {
         let s = Snapshot::build(beads.clone(), vec![], None, Utc::now(), &{
             let mut p = Profile::default();
             p.set_parent_key(Some("tracker.fields.parent")).unwrap();
-            p
+            Arc::new(p)
         });
         assert_eq!(s.parent_key.as_deref(), Some("tracker.fields.parent"));
         let children: Vec<_> = s.children("fx-e").iter().map(|b| b.id.as_str()).collect();

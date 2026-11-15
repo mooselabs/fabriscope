@@ -85,21 +85,13 @@ impl Sweep {
         let (Some(s), Some(store)) = (view.snapshot(), view.provenance.as_ref()) else {
             return Vec::new();
         };
-        let p = &view.profile;
-        let read_ahead = |i: usize| {
-            s.derived.rows.get(i).is_some_and(|r| {
-                r.states
-                    .iter()
-                    .any(|k| p.state(k).is_some_and(|st| st.read_ahead))
-            })
-        };
         let since = now - Duration::days(RECENT_DAYS);
         let mut ahead = Vec::new();
         let mut working = Vec::new();
         let mut closed: Vec<(DateTime<Utc>, usize)> = Vec::new();
         for &i in &s.order {
             let bead = &s.beads[i];
-            if read_ahead(i) {
+            if s.derived.reads_ahead(i) {
                 ahead.push(i);
             } else if bead.status == "in_progress" {
                 working.push(i);

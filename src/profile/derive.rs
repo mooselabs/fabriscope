@@ -64,9 +64,13 @@ pub struct Derived {
 
 impl Derived {
     /// Applies `profile` to every bead of `snapshot` at `now`.
-    pub fn build(snapshot: &Snapshot, profile: &Profile, now: DateTime<Utc>) -> Self {
+    pub fn build(
+        snapshot: &Snapshot,
+        profile: &std::sync::Arc<Profile>,
+        now: DateTime<Utc>,
+    ) -> Self {
         let mut out = Derived {
-            profile: std::sync::Arc::new(profile.clone()),
+            profile: profile.clone(),
             ..Default::default()
         };
         for (i, bead) in snapshot.beads.iter().enumerate() {
@@ -170,6 +174,18 @@ impl Derived {
             out.rows.push(row);
         }
         out
+    }
+
+    /// Whether bead `index` is an item in a state the profile reads ahead
+    /// (`read_ahead`): held work, whose trail, thread and runs are read
+    /// before anyone opens it.
+    pub fn reads_ahead(&self, index: usize) -> bool {
+        self.is_item(index)
+            && self.rows.get(index).is_some_and(|r| {
+                r.states
+                    .iter()
+                    .any(|k| self.profile.state(k).is_some_and(|s| s.read_ahead))
+            })
     }
 
     /// Whether bead `index` is a work item (not a receipt or hidden row).

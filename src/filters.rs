@@ -119,25 +119,10 @@ pub(crate) fn counting(facets: &Facets, group: Option<&str>) -> Facets {
 /// Items in a `read_ahead` state that are not in progress (in-progress
 /// beads are read ahead already), so held work has its trail when a page
 /// shows it.
-pub(crate) fn read_ahead(s: &Snapshot, profile: &Profile, limit: usize) -> Vec<String> {
-    let ahead: Vec<&str> = profile
-        .states
-        .iter()
-        .filter(|st| st.read_ahead)
-        .map(|st| st.key.as_str())
-        .collect();
-    if ahead.is_empty() {
-        return Vec::new();
-    }
+pub(crate) fn read_ahead(s: &Snapshot, limit: usize) -> Vec<String> {
     s.order
         .iter()
-        .filter(|&&i| s.derived.is_item(i) && s.beads[i].status != "in_progress")
-        .filter(|&&i| {
-            s.derived.rows[i]
-                .states
-                .iter()
-                .any(|k| ahead.contains(&k.as_str()))
-        })
+        .filter(|&&i| s.beads[i].status != "in_progress" && s.derived.reads_ahead(i))
         .take(limit)
         .map(|&i| s.beads[i].id.clone())
         .collect()
@@ -412,10 +397,17 @@ mod tests {
     fn read_ahead_names_held_items_and_profiles_are_told_apart() {
         let view = work_view();
         let s = view.snapshot().unwrap();
-        assert_eq!(read_ahead(s, &view.profile, 10), ["wk-3"]);
+        assert_eq!(read_ahead(s, 10), ["wk-3"]);
         assert!(profiled(&view.profile));
         assert!(!profiled(&Profile::default()));
-        assert!(read_ahead(s, &Profile::default(), 10).is_empty());
+        let generic = Snapshot::build(
+            s.beads.clone(),
+            vec![],
+            None,
+            chrono::Utc::now(),
+            &Default::default(),
+        );
+        assert!(read_ahead(&generic, 10).is_empty());
         let mut f = Facets::default();
         f.groups.insert("milestone".into(), "v1".into());
         f.state = "open".into();

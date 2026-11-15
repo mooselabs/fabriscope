@@ -34,7 +34,7 @@ async fn overview(State(app): State<App>) -> Html<String> {
     {
         let view = app.view.read().await;
         if let Some(s) = view.snapshot() {
-            ahead.extend(filters::read_ahead(s, &view.profile, HELD_AHEAD));
+            ahead.extend(filters::read_ahead(s, HELD_AHEAD));
         }
     }
     app.want_provenance(ahead).await;
