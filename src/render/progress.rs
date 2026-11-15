@@ -6,7 +6,7 @@
 
 use super::fmt::{count, money, seconds, tokens, when, words};
 use super::panels::{feed_label, feed_value, joined};
-use super::{escape, run_link, tone_badge, url};
+use super::{escape, maybe, run_link, tone_badge, url};
 use crate::beads::Bead;
 use crate::model::View;
 use crate::provenance::{self, Fact, Mark, Note, Progress, Stage, Usage};
@@ -237,29 +237,34 @@ fn usage(u: &Usage) -> String {
     if u.events == 0 {
         return "<p class=\"muted\">No usage recorded.</p>".into();
     }
+    let u = &u.spend;
     let mut out = format!(
-        "<dl class=\"facts usage\"><dt>Cost</dt><dd>{}</dd><dt>Tokens</dt><dd title=\"{}\">{}</dd><dt>Wall time</dt><dd>{}</dd>",
-        escape(&money(u.dollars)),
-        count(u.tokens),
-        escape(&tokens(u.tokens)),
-        escape(&seconds(u.wall_seconds as f64))
+        "<dl class=\"facts usage\"><dt>Cost</dt><dd>{}</dd><dt>Tokens</dt><dd{}>{}</dd><dt>Wall time</dt><dd>{}</dd>",
+        maybe(u.dollars, money),
+        u.tokens
+            .map(|t| format!(" title=\"{}\"", count(t)))
+            .unwrap_or_default(),
+        maybe(u.tokens, tokens),
+        maybe(u.wall_seconds, seconds)
     );
-    if u.gate_runs > 0 || u.gate_seconds > 0 {
+    if u.gate_runs.is_some() || u.gate_seconds.is_some() {
         write!(
             out,
-            "<dt>Gates</dt><dd>{} {} · {}</dd>",
-            u.gate_runs,
-            if u.gate_runs == 1 { "run" } else { "runs" },
-            escape(&seconds(u.gate_seconds as f64))
+            "<dt>Gates</dt><dd>{} · {}</dd>",
+            maybe(u.gate_runs, |n| format!(
+                "{n} {}",
+                if n == 1 { "run" } else { "runs" }
+            )),
+            maybe(u.gate_seconds, seconds)
         )
         .unwrap();
     }
-    if u.gate_reused > 0 || u.gate_saved_seconds > 0 {
+    if u.gate_reused.is_some() || u.gate_saved_seconds.is_some() {
         write!(
             out,
             "<dt>Gates reused</dt><dd>{} · saved {}</dd>",
-            u.gate_reused,
-            escape(&seconds(u.gate_saved_seconds as f64))
+            maybe(u.gate_reused, |n| n.to_string()),
+            maybe(u.gate_saved_seconds, seconds)
         )
         .unwrap();
     }
@@ -423,9 +428,9 @@ pub(crate) fn cost_section(view: &View, bead: &Bead) -> String {
                 write!(
                     out,
                     "<dt>Ledger usage</dt><dd><strong>{}</strong> · {} tokens · {} wall <small>Source: the provenance log's <code>used</code> events, summed over {attempts} {}.</small></dd>",
-                    escape(&money(total.dollars)),
-                    escape(&tokens(total.tokens)),
-                    escape(&seconds(total.wall_seconds as f64)),
+                    maybe(total.spend.dollars, money),
+                    maybe(total.spend.tokens, tokens),
+                    maybe(total.spend.wall_seconds, seconds),
                     if attempts == 1 { "attempt" } else { "attempts" }
                 )
                 .unwrap();
@@ -563,6 +568,31 @@ mod tests {
         );
         assert!(page.contains("<small class=\"stage-detail\">rig rigA · generation 2</small>"));
         assert!(page.contains("<small class=\"stage-detail\">formula build</small>"));
+    }
+
+    #[test]
+    fn usage_without_dollars_is_unknown_never_zero() {
+        let mut view = with_trail(
+            view(),
+            r#"[
+              {"id":"1","kind":"claim","occurred_at":"2026-11-15T01:00:00Z"},
+              {"id":"2","kind":"used","occurred_at":"2026-11-15T02:00:00Z","payload":"{\"tokens\":5000}"}
+            ]"#,
+        );
+        view.profile = crate::testing::work_view().profile;
+        let page = bead(&view, "fx-1").unwrap();
+        assert!(
+            page.contains("<dt>Cost</dt><dd><span class=\"muted\">unknown</span></dd>"),
+            "{page}"
+        );
+        assert!(page.contains("<dd title=\"5,000\">"), "{page}");
+        assert!(
+            page.contains(
+                "<dt>Ledger usage</dt><dd><strong><span class=\"muted\">unknown</span></strong>"
+            ),
+            "{page}"
+        );
+        assert!(!page.contains("$0.00"), "{page}");
     }
 
     #[test]

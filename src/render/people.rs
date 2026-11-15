@@ -288,7 +288,7 @@ pub(crate) fn people(view: &View, facets: &Facets) -> String {
                 t.last
                     .as_ref()
                     .map(|(_, text)| when(text))
-                    .unwrap_or_else(|| "<span class=\"muted\">unknown</span>".into())
+                    .unwrap_or_else(|| super::unknown().into())
             )
             .unwrap();
         }

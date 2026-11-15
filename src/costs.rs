@@ -16,11 +16,11 @@
 //! A value nobody recorded is `None` and is shown as unknown, never as 0.
 
 use crate::model::View;
-use crate::provenance::{Event, Progress};
+pub use crate::provenance::Spend;
+use crate::provenance::{Event, Progress, attempt_events, plus};
 use crate::query::Range;
 use crate::runs::cache::Fetch;
 use chrono::{DateTime, Utc};
-use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Where a figure came from. The two are never mixed in one total without
@@ -36,68 +36,6 @@ impl Source {
         match self {
             Source::Feed => "run feed",
             Source::Provenance => "provenance",
-        }
-    }
-}
-
-/// What was spent. `None` means nobody recorded it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Spend {
-    pub dollars: Option<f64>,
-    pub tokens: Option<u64>,
-    pub wall_seconds: Option<f64>,
-    pub gate_runs: Option<u64>,
-    pub gate_seconds: Option<f64>,
-    pub gate_reused: Option<u64>,
-    pub gate_saved_seconds: Option<f64>,
-}
-
-/// A sum where a missing side adds nothing and two missing sides stay
-/// missing.
-fn plus<T: std::ops::Add<Output = T>>(a: Option<T>, b: Option<T>) -> Option<T> {
-    match (a, b) {
-        (Some(x), Some(y)) => Some(x + y),
-        (x, None) => x,
-        (None, y) => y,
-    }
-}
-
-impl Spend {
-    pub fn add(&mut self, other: &Spend) {
-        self.dollars = plus(self.dollars, other.dollars);
-        self.tokens = plus(self.tokens, other.tokens);
-        self.wall_seconds = plus(self.wall_seconds, other.wall_seconds);
-        self.gate_runs = plus(self.gate_runs, other.gate_runs);
-        self.gate_seconds = plus(self.gate_seconds, other.gate_seconds);
-        self.gate_reused = plus(self.gate_reused, other.gate_reused);
-        self.gate_saved_seconds = plus(self.gate_saved_seconds, other.gate_saved_seconds);
-    }
-
-    /// Each field this spend lacks, taken from `fallback`.
-    fn or(&mut self, fallback: &Spend) {
-        self.dollars = self.dollars.or(fallback.dollars);
-        self.tokens = self.tokens.or(fallback.tokens);
-        self.wall_seconds = self.wall_seconds.or(fallback.wall_seconds);
-        self.gate_runs = self.gate_runs.or(fallback.gate_runs);
-        self.gate_seconds = self.gate_seconds.or(fallback.gate_seconds);
-        self.gate_reused = self.gate_reused.or(fallback.gate_reused);
-        self.gate_saved_seconds = self.gate_saved_seconds.or(fallback.gate_saved_seconds);
-    }
-
-    /// One `used` event's spend: each payload key that is present (a key
-    /// left out stays unknown).
-    pub fn of_used(event: &Event) -> Self {
-        let fields: HashMap<String, Value> = event.fields().into_iter().collect();
-        let number = |key: &str| fields.get(key).and_then(Value::as_f64);
-        let whole = |key: &str| number(key).map(|n| n.max(0.0).round() as u64);
-        Self {
-            dollars: number("dollars"),
-            tokens: whole("tokens"),
-            wall_seconds: number("wall_seconds"),
-            gate_runs: whole("gate_runs"),
-            gate_seconds: number("gate_seconds"),
-            gate_reused: whole("gate_reused"),
-            gate_saved_seconds: number("gate_saved_seconds"),
         }
     }
 }
@@ -513,7 +451,7 @@ pub fn provenance_attempts(view: &View) -> Vec<ProvAttempt> {
         }
         let progress = Progress::new(&s.beads[item], &trail.events);
         let mut ids: Vec<Option<String>> = progress.earlier.iter().map(|a| a.id.clone()).collect();
-        let segments = segments(&trail.events);
+        let segments = attempt_events(&trail.events);
         if segments.len() > ids.len() {
             ids.push(progress.attempt.clone());
         }
@@ -545,23 +483,6 @@ pub fn provenance_attempts(view: &View) -> Vec<ProvAttempt> {
             }
             out.push(attempt);
         }
-    }
-    out
-}
-
-/// A trail's events in attempts, the way `Progress::new` splits them: each
-/// `claim` after one already seen starts the next.
-fn segments(events: &[Event]) -> Vec<Vec<&Event>> {
-    let mut out: Vec<Vec<&Event>> = Vec::new();
-    for event in events {
-        let starts_new = event.kind == "claim"
-            && out
-                .last()
-                .is_some_and(|a| a.iter().any(|e| e.kind == "claim"));
-        if out.is_empty() || starts_new {
-            out.push(Vec::new());
-        }
-        out.last_mut().unwrap().push(event);
     }
     out
 }
@@ -811,7 +732,7 @@ mod tests {
         assert_eq!(shares[0].dollars, None);
         let event = Event {
             kind: "used".into(),
-            payload: Value::String("{\"tokens\":5}".into()),
+            payload: serde_json::Value::String("{\"tokens\":5}".into()),
             ..Default::default()
         };
         let spend = Spend::of_used(&event);

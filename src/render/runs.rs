@@ -436,14 +436,16 @@ pub(crate) fn runs(view: &View, facets: &Facets) -> String {
     body.push_str(&runs_form(facets, index, &keys));
     let costed: Vec<f64> = listed.iter().filter_map(|r| r.cost_usd).collect();
     let missing = listed.len() - costed.len();
-    let total: f64 = costed.iter().sum();
+    // No run with a cost is no total at all, never $0.
+    let total = (!costed.is_empty()).then(|| costed.iter().sum::<f64>());
     write!(
         body,
         "<p class=\"run-cost\">Total cost of the {} matching runs: <strong>{}</strong>{}</p>",
         listed.len(),
-        escape(&money(total)),
+        super::maybe(total, money),
         match missing {
             0 => String::new(),
+            _ if total.is_none() => String::new(),
             1 => " · 1 run has no cost recorded, so this is a lower bound".into(),
             n => format!(" · {n} runs have no cost recorded, so this is a lower bound"),
         }

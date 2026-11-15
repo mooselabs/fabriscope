@@ -350,9 +350,9 @@ pub(crate) fn runs_section(view: &View, bead: &Bead) -> String {
             "<tr><td>{}</td><td>{}</td><td>{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td><td>{}</td></tr>",
             run_link(&run.run, &run.run),
             tone_badge(&words(&run.state), runs::run_tone(&run.state)),
-            run.started_at.as_deref().map(when).unwrap_or_else(|| "<span class=\"muted\">unknown</span>".into()),
+            run.started_at.as_deref().map(when).unwrap_or_else(|| super::unknown().into()),
             run.attempts,
-            run.cost_usd.map(|c| escape(&money(c))).unwrap_or_else(|| "<span class=\"muted\">unknown</span>".into()),
+            run.cost_usd.map(|c| escape(&money(c))).unwrap_or_else(|| super::unknown().into()),
             run.stop_code.as_deref().map(|c| format!("<code>{}</code>", escape(c))).unwrap_or_default()
         )
         .unwrap();

@@ -231,19 +231,76 @@ pub struct Stage {
 const DETAIL_KEYS: [(&str, &[&str]); 2] =
     [("claim", &["rig", "generation"]), ("cut", &["formula"])];
 
-/// What an attempt used, summed over its `used` events. Each field is the
-/// payload key of the same name (`dollars`, `tokens`, `wall_seconds`,
-/// `gate_runs`, `gate_seconds`, `gate_reused`, `gate_saved_seconds`); a
-/// missing key adds nothing.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// What was spent. Each field is the `used` payload key of the same name;
+/// `None` means nobody recorded it, and is shown as unknown, never as 0.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Spend {
+    pub dollars: Option<f64>,
+    pub tokens: Option<u64>,
+    pub wall_seconds: Option<f64>,
+    pub gate_runs: Option<u64>,
+    pub gate_seconds: Option<f64>,
+    pub gate_reused: Option<u64>,
+    pub gate_saved_seconds: Option<f64>,
+}
+
+/// A sum where a missing side adds nothing and two missing sides stay
+/// missing.
+pub fn plus<T: std::ops::Add<Output = T>>(a: Option<T>, b: Option<T>) -> Option<T> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x + y),
+        (x, None) => x,
+        (None, y) => y,
+    }
+}
+
+impl Spend {
+    pub fn add(&mut self, other: &Spend) {
+        self.dollars = plus(self.dollars, other.dollars);
+        self.tokens = plus(self.tokens, other.tokens);
+        self.wall_seconds = plus(self.wall_seconds, other.wall_seconds);
+        self.gate_runs = plus(self.gate_runs, other.gate_runs);
+        self.gate_seconds = plus(self.gate_seconds, other.gate_seconds);
+        self.gate_reused = plus(self.gate_reused, other.gate_reused);
+        self.gate_saved_seconds = plus(self.gate_saved_seconds, other.gate_saved_seconds);
+    }
+
+    /// Each field this spend lacks, taken from `fallback`.
+    pub fn or(&mut self, fallback: &Spend) {
+        self.dollars = self.dollars.or(fallback.dollars);
+        self.tokens = self.tokens.or(fallback.tokens);
+        self.wall_seconds = self.wall_seconds.or(fallback.wall_seconds);
+        self.gate_runs = self.gate_runs.or(fallback.gate_runs);
+        self.gate_seconds = self.gate_seconds.or(fallback.gate_seconds);
+        self.gate_reused = self.gate_reused.or(fallback.gate_reused);
+        self.gate_saved_seconds = self.gate_saved_seconds.or(fallback.gate_saved_seconds);
+    }
+
+    /// One `used` event's spend: each payload key that is present (a key
+    /// left out stays unknown). Other kinds spend nothing known.
+    pub fn of_used(event: &Event) -> Self {
+        if event.kind != "used" {
+            return Self::default();
+        }
+        let fields = event.object().unwrap_or_default();
+        let number = |key: &str| fields.get(key).and_then(Value::as_f64);
+        let whole = |key: &str| number(key).map(|n| n.max(0.0).round() as u64);
+        Self {
+            dollars: number("dollars"),
+            tokens: whole("tokens"),
+            wall_seconds: number("wall_seconds"),
+            gate_runs: whole("gate_runs"),
+            gate_seconds: number("gate_seconds"),
+            gate_reused: whole("gate_reused"),
+            gate_saved_seconds: number("gate_saved_seconds"),
+        }
+    }
+}
+
+/// What an attempt used, summed over its `used` events.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Usage {
-    pub dollars: f64,
-    pub tokens: u64,
-    pub wall_seconds: u64,
-    pub gate_runs: u64,
-    pub gate_seconds: u64,
-    pub gate_reused: u64,
-    pub gate_saved_seconds: u64,
+    pub spend: Spend,
     /// How many `used` events were summed; zero means nothing is known.
     pub events: usize,
 }
@@ -251,33 +308,15 @@ pub struct Usage {
 impl Usage {
     /// One `used` event's usage; other kinds give nothing.
     pub fn of(event: &Event) -> Self {
-        if event.kind != "used" {
-            return Self::default();
-        }
-        let fields = event.object().unwrap_or_default();
-        let number = |key: &str| fields.get(key).and_then(Value::as_f64).unwrap_or(0.0);
-        let whole = |key: &str| number(key).max(0.0).round() as u64;
         Self {
-            dollars: number("dollars"),
-            tokens: whole("tokens"),
-            wall_seconds: whole("wall_seconds"),
-            gate_runs: whole("gate_runs"),
-            gate_seconds: whole("gate_seconds"),
-            gate_reused: whole("gate_reused"),
-            gate_saved_seconds: whole("gate_saved_seconds"),
-            events: 1,
+            spend: Spend::of_used(event),
+            events: usize::from(event.kind == "used"),
         }
     }
 
     /// Adds `other` into this total.
     pub fn add(&mut self, other: &Usage) {
-        self.dollars += other.dollars;
-        self.tokens += other.tokens;
-        self.wall_seconds += other.wall_seconds;
-        self.gate_runs += other.gate_runs;
-        self.gate_seconds += other.gate_seconds;
-        self.gate_reused += other.gate_reused;
-        self.gate_saved_seconds += other.gate_saved_seconds;
+        self.spend.add(&other.spend);
         self.events += other.events;
     }
 
@@ -288,6 +327,24 @@ impl Usage {
         }
         total
     }
+}
+
+/// A log's events in attempts, oldest first, the way `Progress::new` splits
+/// them: each `claim` after one already seen starts the next attempt, and
+/// events before the first claim belong to the first.
+pub fn attempt_events(events: &[Event]) -> Vec<Vec<&Event>> {
+    let mut out: Vec<Vec<&Event>> = Vec::new();
+    for event in events {
+        let starts_new = event.kind == "claim"
+            && out
+                .last()
+                .is_some_and(|a| a.iter().any(|e| e.kind == "claim"));
+        if out.is_empty() || starts_new {
+            out.push(Vec::new());
+        }
+        out.last_mut().unwrap().push(event);
+    }
+    out
 }
 
 /// The attempt id an attempt's events carry: the `ref` of a `cut` or
@@ -521,20 +578,10 @@ fn latest_done(stages: &[Stage]) -> Option<String> {
 }
 
 impl Progress {
-    /// `events` oldest first, as `parse` returns them. Each `claim` starts
-    /// an attempt; events before the first claim belong to the first.
+    /// `events` oldest first, as `parse` returns them, split into attempts
+    /// by `attempt_events`.
     pub fn new(bead: &Bead, events: &[Event]) -> Self {
-        let mut attempts: Vec<Vec<&Event>> = Vec::new();
-        for event in events {
-            let starts_new = event.kind == "claim"
-                && attempts
-                    .last()
-                    .is_some_and(|a| a.iter().any(|e| e.kind == "claim"));
-            if attempts.is_empty() || starts_new {
-                attempts.push(Vec::new());
-            }
-            attempts.last_mut().unwrap().push(event);
-        }
+        let mut attempts = attempt_events(events);
         let claims = events.iter().filter(|e| e.kind == "claim").count();
         let latest = attempts.pop().unwrap_or_default();
         let mut earlier: Vec<Attempt> = attempts
@@ -595,7 +642,7 @@ impl Progress {
 
     /// Usage over every attempt, earlier ones included.
     pub fn usage(&self) -> Usage {
-        let mut total = self.current_usage;
+        let mut total = self.current_usage.clone();
         for attempt in &self.earlier {
             total.add(&attempt.usage);
         }
@@ -1023,13 +1070,14 @@ mod tests {
         assert_eq!(p.earlier.len(), 1);
         assert_eq!(p.earlier[0].id.as_deref(), Some("att-0002-1"));
         assert_eq!(p.attempt.as_deref(), Some("att-0002-2"));
-        assert_eq!(p.earlier[0].usage.tokens, 900_000);
+        assert_eq!(p.earlier[0].usage.spend.tokens, Some(900_000));
         let total = p.usage();
         assert_eq!(total.events, 2);
-        assert!((total.dollars - 5.37).abs() < 1e-9, "{}", total.dollars);
-        assert_eq!(total.gate_runs, 3);
-        assert_eq!(total.gate_reused, 1);
-        assert_eq!(total.wall_seconds, 3600 + 9000);
+        let dollars = total.spend.dollars.unwrap();
+        assert!((dollars - 5.37).abs() < 1e-9, "{dollars}");
+        assert_eq!(total.spend.gate_runs, Some(3));
+        assert_eq!(total.spend.gate_reused, Some(1));
+        assert_eq!(total.spend.wall_seconds, Some(3600.0 + 9000.0));
         let claimed = &p.stages[1];
         assert_eq!(
             claimed.details,

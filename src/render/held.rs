@@ -422,7 +422,7 @@ fn held_table(view: &View, state: &StateRule, items: &[usize], now: DateTime<Utc
                 Some(age) => format!("{}<small>since {}</small>", escape(&age), when(since)),
                 None => escape(since),
             },
-            None => "<span class=\"muted\">unknown</span>".into(),
+            None => super::unknown().into(),
         };
         let joined = join(view, bead, state);
         let attempt = match (&joined.attempt, joined.trail) {
@@ -458,10 +458,8 @@ fn stop_history(view: &View, facets: &Facets, now: DateTime<Utc>) -> String {
         return String::new();
     };
     let (range, default) = range_or_default(facets);
-    let mut items = facets.clone();
-    if items.state.is_empty() {
-        items.state = "all".into();
-    }
+    // Stops are history: no state filter means every state.
+    let items = facets.any_status();
     let in_range = |at: &str| range.contains(at, now);
     let mut considered = 0;
     let mut threads = 0;

@@ -196,6 +196,19 @@ pub(crate) fn status_options<'a>(beads: impl Iterator<Item = &'a Bead>) -> Vec<(
     options
 }
 
+/// A muted "unknown": what every page shows for a value nobody recorded,
+/// never 0.
+pub(crate) fn unknown() -> &'static str {
+    "<span class=\"muted\">unknown</span>"
+}
+
+/// A recorded value shown by `show` and escaped, or `unknown()`.
+pub(crate) fn maybe<T: Copy>(value: Option<T>, show: impl Fn(T) -> String) -> String {
+    value
+        .map(|v| escape(&show(v)))
+        .unwrap_or_else(|| unknown().into())
+}
+
 pub(crate) fn selected(on: bool) -> &'static str {
     if on { " selected" } else { "" }
 }

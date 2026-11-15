@@ -2,13 +2,12 @@
 // `costs(&View, &Facets) -> String`.
 //! `/costs`: spend by attempt, run, group and model, from provenance usage
 //! and the run feed (see `crate::costs`). Also the small helpers the WP6
-//! pages (`held`, `receipts`) share: tiles, the date-range controls and the
-//! "unknown" marker.
+//! pages (`held`, `receipts`) share: tiles and the date-range controls.
 
 use super::fmt::{count, money, seconds, tokens};
 use super::layout::page;
 use super::svg::{Bar, hbars};
-use super::{PAGE_SIZE, bead_link, escape, heading, pagination, run_link, select};
+use super::{PAGE_SIZE, bead_link, escape, heading, maybe, pagination, run_link, select, unknown};
 use crate::costs::{self, Figure, ItemRow, Report, Share};
 use crate::model::View;
 use crate::profile::Tone;
@@ -83,11 +82,6 @@ pub(super) fn hidden(facets: &Facets, skip: &[&str]) -> String {
         .collect()
 }
 
-/// A muted "unknown": what a page shows for a value nobody recorded.
-pub(super) fn unknown() -> &'static str {
-    "<span class=\"muted\">unknown</span>"
-}
-
 /// A row of tiles: (label, value HTML, detail).
 pub(super) fn tiles(cards: &[(&str, String, String)]) -> String {
     let mut out = "<div class=\"metrics tiles\">".to_string();
@@ -117,21 +111,12 @@ fn dollars(usd: Option<f64>, partial: bool) -> String {
     }
 }
 
-fn maybe<T: Copy>(value: Option<T>, show: impl Fn(T) -> String) -> String {
-    value
-        .map(|v| escape(&show(v)))
-        .unwrap_or_else(|| unknown().into())
-}
-
 /// `/costs`.
 pub(crate) fn costs(view: &View, facets: &Facets) -> String {
     let now = Utc::now();
     let (range, default_range) = range_or_default(facets);
     // Costs are mostly of closed work: no state filter means every state.
-    let mut items = facets.clone();
-    if items.state.is_empty() {
-        items.state = "all".into();
-    }
+    let items = facets.any_status();
     let picking = picks_items(facets);
     let keep = |item: Option<usize>| match item {
         Some(i) => items.matches(view, i),
