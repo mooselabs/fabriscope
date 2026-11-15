@@ -6,13 +6,6 @@
 //! Fabriscope stays generic: without a profile every row is an item and the
 //! pages show what Beads itself stores. The full format, with an example, is
 //! in docs/profile.md; `fabriscope profile check FILE` validates one.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; lookups read by WP1–WP6 (BKLG-20261115-4e2r)"
-    )
-)]
 
 pub mod cond;
 pub mod derive;
@@ -451,13 +444,6 @@ impl Profile {
             ));
         }
         profile.validate()?;
-        Ok(profile)
-    }
-
-    /// The generic profile, with `--parent-key` as the parent rule.
-    pub fn generic(parent_key: Option<&str>) -> Result<Self, String> {
-        let mut profile = Self::default();
-        profile.set_parent_key(parent_key)?;
         Ok(profile)
     }
 
@@ -1119,13 +1105,11 @@ mod tests {
             p.banner("held", held).unwrap(),
             "Held since 2026-11-15T09:15:00Z: scope-exceeded (scope)"
         );
-        assert!(Profile::generic(Some("a..b")).is_err());
+        let mut generic = Profile::default();
+        assert!(generic.set_parent_key(Some("a..b")).is_err());
+        generic.set_parent_key(Some("work.parent")).unwrap();
         assert_eq!(
-            Profile::generic(Some("work.parent"))
-                .unwrap()
-                .parent
-                .unwrap()
-                .path,
+            generic.parent.unwrap().path,
             Source::Meta(vec!["work".into(), "parent".into()])
         );
     }

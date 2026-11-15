@@ -10,13 +10,6 @@
 //! display decisions. `Index` is the in-memory join from subjects, beads and
 //! attempt ids to runs; `client` (WP5) keeps it current and `cache` holds run
 //! docs and document pages.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; WP5 and WP6 read it (BKLG-20261115-4e2r)"
-    )
-)]
 
 pub mod cache;
 pub mod client;
@@ -416,7 +409,15 @@ pub struct Turn {
     pub omitted_bytes: Option<u64>,
 }
 
-/// One line of `changes.jsonl`.
+/// One line of `changes.jsonl`. Part of the runfeed.v1 contract; fabriscope
+/// polls `feed.json`'s revision instead and does not read it yet.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "documented runfeed.v1 shape kept with the spec (BKLG-20261115-4e2r)"
+    )
+)]
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Change {
@@ -550,13 +551,6 @@ impl Source {
             return Err(format!("--runs {value} is not a directory"));
         }
         Ok(Source::Dir(dir))
-    }
-
-    pub fn describe(&self) -> String {
-        match self {
-            Source::Dir(dir) => dir.display().to_string(),
-            Source::Url { base, .. } => base.clone(),
-        }
     }
 
     /// Reads one feed file by href. Blocking: call it in `spawn_blocking`.
@@ -766,7 +760,7 @@ mod tests {
         assert_eq!(fact_tone(Some("good")), Tone::Good);
         assert_eq!(fact_tone(Some("purple")), Tone::Neutral);
         assert!(doc_readable("truncated") && !doc_readable("withheld"));
-        assert!(golden().describe().ends_with("runfeed/v1"));
+        assert!(matches!(golden(), Source::Dir(dir) if dir.ends_with("runfeed/v1")));
     }
 
     #[test]

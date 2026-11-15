@@ -1099,9 +1099,6 @@ pre.json {
   overflow:auto;
   font-size:12px;
 }
-.placeholder {
-  padding:24px 0;
-}
 .chart .bar {
   fill:var(--badge-neutral);
 }

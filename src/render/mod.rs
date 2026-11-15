@@ -6,13 +6,6 @@
 //! comment at the top of each file); the helpers every page shares live
 //! here and in `fmt`, `values`, `svg` and `layout`, all `pub(crate)` so any
 //! page module or `web::*` handler can call them.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; helpers WP1–WP6 call (BKLG-20261115-4e2r)"
-    )
-)]
 
 pub(crate) mod activity;
 pub(crate) mod bead;
@@ -361,21 +354,6 @@ pub(crate) fn facets_form(view: &View, facets: &Facets, path: &str) -> String {
     }
     out.push_str("<button type=\"submit\">Apply</button></form>");
     out
-}
-
-/// A placeholder page for a route whose package has not landed yet: the
-/// shell, a heading, and one line saying who builds it.
-pub(crate) fn placeholder(view: &View, title: &str, tab: &str, owner: &str) -> String {
-    layout::page(
-        view,
-        title,
-        tab,
-        &format!(
-            "{}<p class=\"placeholder muted\">This page is being built ({}).</p>",
-            heading("Coming soon", title, ""),
-            escape(owner)
-        ),
-    )
 }
 
 #[cfg(test)]

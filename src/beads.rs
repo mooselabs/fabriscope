@@ -602,13 +602,11 @@ mod tests {
         let mut unknown = bead("fx-4", "open", "2026-10-01T00:00:00Z", None);
         unknown.metadata = serde_json::json!({"tracker": {"fields": {"parent": "EPIC-404"}}});
         let beads = vec![epic, by_ref, by_id, native, unknown];
-        let s = Snapshot::build(
-            beads.clone(),
-            vec![],
-            None,
-            Utc::now(),
-            &Profile::generic(Some("tracker.fields.parent")).unwrap(),
-        );
+        let s = Snapshot::build(beads.clone(), vec![], None, Utc::now(), &{
+            let mut p = Profile::default();
+            p.set_parent_key(Some("tracker.fields.parent")).unwrap();
+            p
+        });
         assert_eq!(s.parent_key.as_deref(), Some("tracker.fields.parent"));
         let children: Vec<_> = s.children("fx-e").iter().map(|b| b.id.as_str()).collect();
         assert_eq!(children, ["fx-1", "fx-2"]);

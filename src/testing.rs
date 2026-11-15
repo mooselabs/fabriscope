@@ -148,10 +148,6 @@ mod tests {
         let i = s.position("wk-3").unwrap();
         assert_eq!(view.row(i).unwrap().states, ["held"]);
         assert_eq!(view.group_index().unwrap()["area"].len(), 3);
-        assert!(
-            view.people_index()
-                .unwrap()
-                .contains_key("factory/hostA/rigA")
-        );
+        assert!(s.derived.people.contains_key("factory/hostA/rigA"));
     }
 }

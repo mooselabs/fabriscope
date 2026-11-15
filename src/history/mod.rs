@@ -6,13 +6,6 @@
 //! or whose JSON does not parse, is a plain Markdown comment. Threads are
 //! read in the background (`history::reader`, owned by WP3) and kept in a
 //! `Store`, like provenance trails: pages show the last read and never wait.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; WP2 and WP3 read and fill it (BKLG-20261115-4e2r)"
-    )
-)]
 
 pub mod reader;
 

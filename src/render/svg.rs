@@ -2,13 +2,6 @@
 //! (`chart`, `bar`, `tone-*`, `series-*`, `gridline`, `point`, `range`):
 //! the CSP forbids inline `style=`, so nothing here writes one. Every label
 //! is escaped.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; WP4 and WP6 draw with it (BKLG-20261115-4e2r)"
-    )
-)]
 
 use super::{escape, tone_class};
 use crate::beads;
@@ -75,44 +68,6 @@ fn figure(caption: &str, class: &str, height: f64, inner: &str) -> String {
 
 fn top(values: impl Iterator<Item = f64>) -> f64 {
     values.fold(0.0_f64, f64::max).max(1e-9)
-}
-
-/// A line over labelled points, left to right, with the first and last
-/// labels under the axis.
-pub(crate) fn line(caption: &str, points: &[(String, f64)]) -> String {
-    if points.is_empty() {
-        return String::new();
-    }
-    let max = top(points.iter().map(|p| p.1)) * 1.15;
-    let y = |v: f64| 190.0 - v / max * 156.0;
-    let x = |i: usize| 58.0 + i as f64 / (points.len().max(2) - 1) as f64 * 802.0;
-    let mut out = String::new();
-    for fraction in [0.0, 0.5, 1.0] {
-        let v = max * fraction;
-        write!(out, "<line class=\"gridline\" x1=\"58\" x2=\"860\" y1=\"{0:.1}\" y2=\"{0:.1}\"/><text x=\"48\" y=\"{1:.1}\" text-anchor=\"end\">{2:.0}</text>", y(v), y(v) + 4.0, v).unwrap();
-    }
-    let path: Vec<String> = points
-        .iter()
-        .enumerate()
-        .map(|(i, p)| format!("{:.1},{:.1}", x(i), y(p.1)))
-        .collect();
-    write!(
-        out,
-        "<polyline class=\"total-line\" points=\"{}\"/>",
-        path.join(" ")
-    )
-    .unwrap();
-    for (i, (label, v)) in points.iter().enumerate() {
-        write!(out, "<circle class=\"point\" cx=\"{:.1}\" cy=\"{:.1}\" r=\"4\"><title>{}: {v}</title></circle>", x(i), y(*v), escape(label)).unwrap();
-    }
-    write!(
-        out,
-        "<text x=\"58\" y=\"220\">{}</text><text x=\"860\" y=\"220\" text-anchor=\"end\">{}</text>",
-        escape(&points[0].0),
-        escape(&points[points.len() - 1].0)
-    )
-    .unwrap();
-    figure(caption, "line", 235.0, &out)
 }
 
 /// Horizontal bars, one row each: label, bar (toned), value as `format`
@@ -206,7 +161,6 @@ mod tests {
     fn svg_helpers_escape_and_never_write_inline_styles() {
         let label = || "<b>&\"x\"".to_string();
         let charts = [
-            line("Created <per day>", &[(label(), 1.0), ("b".into(), 3.0)]),
             hbars(
                 "Cost",
                 &[Bar {
@@ -236,8 +190,8 @@ mod tests {
             assert!(!chart.contains("<b>"), "{chart}");
             assert!(chart.contains("&lt;b&gt;"));
         }
-        assert!(charts[1].contains("tone-bad"));
-        assert!(charts[3].contains("1h 0m – 2h 0m"));
-        assert!(line("x", &[]).is_empty() && age_bars("x", &[]).is_empty());
+        assert!(charts[0].contains("tone-bad"));
+        assert!(charts[2].contains("1h 0m – 2h 0m"));
+        assert!(age_bars("x", &[]).is_empty());
     }
 }

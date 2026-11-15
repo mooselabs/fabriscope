@@ -83,6 +83,8 @@ async fn health(State(app): State<App>) -> Response {
     let runs = view.runs.as_ref().map(|f| {
         let mut status = f.data.status();
         status["error"] = serde_json::json!(f.error);
+        let (runs, page_bytes) = view.run_cache.held();
+        status["cache"] = serde_json::json!({ "runs": runs, "page_bytes": page_bytes });
         status
     });
     let update = app

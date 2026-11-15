@@ -1,12 +1,5 @@
 //! The view every page renders: the last good read of each store, the
 //! profile, and what background reads have gathered.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; View accessors WP1–WP6 call (BKLG-20261115-4e2r)"
-    )
-)]
 
 use crate::profile::{Profile, RowFacts};
 use crate::{beads, history, provenance, runs, scrolls};
@@ -75,11 +68,6 @@ impl View {
         self.snapshot().map(|s| &s.derived.groups)
     }
 
-    /// Person name → bead indexes naming them (items only, bead fields only).
-    pub fn people_index(&self) -> Option<&std::collections::BTreeMap<String, Vec<usize>>> {
-        self.snapshot().map(|s| &s.derived.people)
-    }
-
     /// A bead's history thread, once read.
     pub fn thread(&self, id: &str) -> Option<&history::Thread> {
         self.history.as_ref()?.get(id)
@@ -142,50 +130,6 @@ fn contains(haystack: &[&str], needle: &str) -> bool {
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
-pub struct BeadFilter {
-    pub q: String,
-    pub state: String,
-    #[serde(rename = "type")]
-    pub issue_type: String,
-    pub priority: String,
-    /// `yes` for beads `bd ready` lists, `no` for the rest, empty for any.
-    pub ready: String,
-    pub page: usize,
-}
-
-impl BeadFilter {
-    /// `state` is a status exactly as stored, `all`, or empty for every bead
-    /// that is not closed.
-    pub fn matches(&self, bead: &beads::Bead) -> bool {
-        let state = match self.state.as_str() {
-            "" => !bead.is_closed(),
-            "all" => true,
-            status => bead.status == status,
-        };
-        let ready = match self.ready.as_str() {
-            "yes" => bead.ready,
-            "no" => !bead.ready,
-            _ => true,
-        };
-        state
-            && ready
-            && (self.issue_type.is_empty() || bead.issue_type == self.issue_type)
-            && (self.priority.is_empty() || bead.priority.to_string() == self.priority)
-            && (self.q.is_empty()
-                || contains(
-                    &[
-                        &bead.id,
-                        &bead.title,
-                        &bead.external_ref,
-                        &bead.labels.join(" "),
-                    ],
-                    &self.q,
-                ))
-    }
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default)]
 pub struct ScrollFilter {
     pub q: String,
     pub kind: String,
@@ -213,72 +157,6 @@ impl ScrollFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bead_filter_defaults_to_beads_not_closed() {
-        let open = beads::Bead {
-            id: "fx-1".into(),
-            title: "Fix login".into(),
-            status: "open".into(),
-            issue_type: "bug".into(),
-            priority: 1,
-            ..Default::default()
-        };
-        let closed = beads::Bead {
-            id: "fx-2".into(),
-            status: "closed".into(),
-            ..Default::default()
-        };
-        let all = BeadFilter {
-            state: "all".into(),
-            ..Default::default()
-        };
-        assert!(BeadFilter::default().matches(&open));
-        assert!(!BeadFilter::default().matches(&closed));
-        assert!(all.matches(&closed));
-        // A status filter compares with the stored status, so `open` means
-        // status open, not "anything not closed".
-        let status = |state: &str| BeadFilter {
-            state: state.into(),
-            ..Default::default()
-        };
-        assert!(status("open").matches(&open));
-        assert!(!status("open").matches(&closed));
-        assert!(status("closed").matches(&closed));
-        assert!(!status("in_progress").matches(&open));
-        let ready = |ready: &str| BeadFilter {
-            ready: ready.into(),
-            ..Default::default()
-        };
-        assert!(ready("no").matches(&open));
-        assert!(!ready("yes").matches(&open));
-        assert!(ready("yes").matches(&beads::Bead {
-            ready: true,
-            ..open.clone()
-        }));
-        assert!(
-            BeadFilter {
-                q: "LOGIN".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
-        assert!(
-            BeadFilter {
-                issue_type: "bug".into(),
-                priority: "1".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
-        assert!(
-            !BeadFilter {
-                priority: "0".into(),
-                ..Default::default()
-            }
-            .matches(&open)
-        );
-    }
 
     #[test]
     fn scroll_filter_matches_kind_status_and_text() {
