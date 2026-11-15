@@ -21,7 +21,7 @@
 
 use super::{Board, Index, Run, doc_readable};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
@@ -128,6 +128,14 @@ impl Cache {
         }
     }
 
+    /// The cache's state. It holds only fetched copies, so a panic while
+    /// it was held costs at most a stale entry or a byte count that is off
+    /// until eviction; a poisoned lock is taken as it is rather than
+    /// failing every later page.
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Lets misses fetch: `read` reads one feed file by href (blocking; it
     /// runs in `spawn_blocking`), `notify` is called after each arrival, with
     /// the run doc when one arrived (so its attempt ids can be registered).
@@ -149,7 +157,7 @@ impl Cache {
     /// digest changed, and its pages, are fetched again on their next read;
     /// so are boards.
     pub fn index(&self, index: &Index) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         inner.listed = index
             .runs
             .iter()
@@ -186,7 +194,7 @@ impl Cache {
 
     /// The run doc for `run`, without waiting.
     pub fn get_run(&self, run: &str) -> Fetch<Arc<Run>> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let tick = inner.next_tick();
         let (answer, due) = match inner.runs.get_mut(run) {
             Some(slot) => {
@@ -207,7 +215,7 @@ impl Cache {
     /// would read the whole feed and evict the docs bead and run pages
     /// asked for. `Pending` when it is not held.
     pub fn peek_run(&self, run: &str) -> Fetch<Arc<Run>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock();
         inner
             .runs
             .get(run)
@@ -218,7 +226,7 @@ impl Cache {
     /// waiting. `Failed` when the run doc names no such readable page.
     pub fn get_doc_page(&self, run: &str, doc: &str, page: usize) -> Fetch<Arc<String>> {
         let key = (run.to_string(), doc.to_string(), page);
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let tick = inner.next_tick();
         let (answer, due) = match inner.pages.get_mut(&key) {
             Some(slot) => {
@@ -243,7 +251,7 @@ impl Cache {
 
     /// Board `name` of the feed, without waiting.
     pub fn get_board(&self, name: &str) -> Fetch<Arc<Board>> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         let tick = inner.next_tick();
         let (answer, due) = match inner.boards.get_mut(name) {
             Some(slot) => {
@@ -260,7 +268,7 @@ impl Cache {
 
     /// Delivers a run doc read (or its failure).
     pub fn put_run(&self, run: &str, result: Result<Run, String>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         inner.loading.remove(&Key::Run(run.to_string()));
         let digest = match &result {
             Ok(doc) => doc.digest.clone(),
@@ -279,7 +287,7 @@ impl Cache {
     /// Delivers a document page read (or its failure).
     pub fn put_doc_page(&self, run: &str, doc: &str, page: usize, result: Result<String, String>) {
         let key = (run.to_string(), doc.to_string(), page);
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         inner.loading.remove(&Key::Page(key.clone()));
         let bytes = result.as_ref().map_or(0, String::len);
         let slot = inner.slot(result.map(Arc::new), String::new(), bytes);
@@ -299,7 +307,7 @@ impl Cache {
 
     /// Delivers a board read (or its failure).
     pub fn put_board(&self, name: &str, result: Result<Board, String>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock();
         inner.loading.remove(&Key::Board(name.to_string()));
         let slot = inner.slot(result.map(Arc::new), String::new(), 0);
         inner.boards.insert(name.to_string(), slot);
@@ -307,7 +315,7 @@ impl Cache {
 
     /// How many run docs and page bytes are held.
     pub fn held(&self) -> (usize, usize) {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock();
         (inner.runs.len(), inner.page_bytes)
     }
 
@@ -368,7 +376,7 @@ impl Cache {
                     serde_json::from_slice::<Run>(&b).map_err(|e| format!("run doc {run}: {e}"))
                 });
                 self.put_run(&run, doc);
-                return match self.inner.lock().unwrap().runs.get(&run).map(|s| &s.fetch) {
+                return match self.lock().runs.get(&run).map(|s| &s.fetch) {
                     Some(Fetch::Ready(doc)) => Some(doc.clone()),
                     _ => None,
                 };

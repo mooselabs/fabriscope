@@ -14,7 +14,7 @@ use super::fmt::{seconds, when, words};
 use super::layout::page;
 use super::svg::{Bar, hbars};
 use super::{bead_link, escape, facets_form, heading, run_link, select, url};
-use crate::beads::Bead;
+use crate::beads::{Bead, Snapshot};
 use crate::flow::nearest_rank;
 use crate::model::View;
 use crate::profile::{Source, StateRule, Tone};
@@ -259,7 +259,7 @@ pub(crate) fn held(view: &View, facets: &Facets) -> String {
     }
     body.push_str(&group_form(view, &held, facets, by));
     for (state, members) in held.iter().zip(&rows) {
-        body.push_str(&state_section(view, state, members, by, now));
+        body.push_str(&state_section(view, s, state, members, by, now));
     }
     body.push_str(&stop_history(view, facets, now));
     page(view, "Held", "/held", &body)
@@ -301,12 +301,12 @@ fn group_form(view: &View, held: &[&StateRule], facets: &Facets, by: &str) -> St
 
 fn state_section(
     view: &View,
+    s: &Snapshot,
     state: &StateRule,
     members: &[usize],
     by: &str,
     now: DateTime<Utc>,
 ) -> String {
-    let s = view.snapshot().expect("checked by the caller");
     let mut out = format!(
         "<section class=\"held-state\" id=\"held-{}\"><h2>{} <span class=\"muted\">{}</span></h2>",
         url(&state.key),
@@ -357,15 +357,20 @@ fn state_section(
             items.len()
         )
         .unwrap();
-        out.push_str(&held_table(view, state, &items, now));
+        out.push_str(&held_table(view, s, state, &items, now));
         out.push_str("</details>");
     }
     out.push_str("</section>");
     out
 }
 
-fn held_table(view: &View, state: &StateRule, items: &[usize], now: DateTime<Utc>) -> String {
-    let s = view.snapshot().expect("checked by the caller");
+fn held_table(
+    view: &View,
+    s: &Snapshot,
+    state: &StateRule,
+    items: &[usize],
+    now: DateTime<Utc>,
+) -> String {
     let mut out = "<div class=\"table-wrap\"><table class=\"data held\"><thead><tr><th>Item</th><th>Kind</th>".to_string();
     for fact in &state.facts {
         write!(out, "<th>{}</th>", escape(&fact_label(view, fact))).unwrap();

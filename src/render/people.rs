@@ -123,17 +123,10 @@ fn tallies(view: &View, s: &Snapshot, facets: &Facets) -> BTreeMap<String, Tally
     let items = item_facets(facets);
     let bounds = range(facets).bounds(Utc::now());
     let mut out: BTreeMap<String, Tally> = BTreeMap::new();
-    let entry = |out: &mut BTreeMap<String, Tally>, name: &str| {
-        if !out.contains_key(name) {
-            out.insert(
-                name.to_string(),
-                Tally {
-                    class: view.profile.person(name).class,
-                    roles: vec![0; roles.len()],
-                    ..Default::default()
-                },
-            );
-        }
+    let blank = |name: &str| Tally {
+        class: view.profile.person(name).class,
+        roles: vec![0; roles.len()],
+        ..Default::default()
     };
     let mut names = Names::new(view);
     for (i, bead) in s.beads.iter().enumerate() {
@@ -143,14 +136,16 @@ fn tallies(view: &View, s: &Snapshot, facets: &Facets) -> BTreeMap<String, Tally
         let mut involved: BTreeSet<String> = BTreeSet::new();
         if !bead.is_closed() && !bead.assignee.is_empty() {
             let name = names.of(&bead.assignee).to_string();
-            entry(&mut out, &name);
-            out.get_mut(&name).unwrap().holding += 1;
+            out.entry(name.clone())
+                .or_insert_with(|| blank(&name))
+                .holding += 1;
             involved.insert(name);
         }
         for (r, role) in roles.iter().enumerate() {
             if let Some(name) = view.person_in_role(&bead.id, &role.key) {
-                entry(&mut out, &name);
-                out.get_mut(&name).unwrap().roles[r] += 1;
+                out.entry(name.clone())
+                    .or_insert_with(|| blank(&name))
+                    .roles[r] += 1;
                 involved.insert(name);
             }
         }
@@ -162,8 +157,9 @@ fn tallies(view: &View, s: &Snapshot, facets: &Facets) -> BTreeMap<String, Tally
                 .is_some_and(|t| in_bounds(t.date_naive(), bounds));
         if closed_in_range {
             for name in &involved {
-                entry(&mut out, name);
-                out.get_mut(name).unwrap().closed += 1;
+                out.entry(name.clone())
+                    .or_insert_with(|| blank(name))
+                    .closed += 1;
             }
         }
     }
@@ -174,8 +170,7 @@ fn tallies(view: &View, s: &Snapshot, facets: &Facets) -> BTreeMap<String, Tally
         if narrowed && !out.contains_key(&name) {
             continue;
         }
-        entry(&mut out, &name);
-        let t = out.get_mut(&name).unwrap();
+        let t = out.entry(name.clone()).or_insert_with(|| blank(&name));
         if t.last.as_ref().is_none_or(|(last, _)| at > *last) {
             t.last = Some((at, at_text.to_string()));
         }

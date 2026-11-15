@@ -14,6 +14,7 @@ use super::values::{Ctx, value};
 use super::{
     PAGE_SIZE, bead_link, escape, heading, pagination, person_link, run_link, select, tone_badge,
 };
+use crate::beads::Snapshot;
 use crate::model::View;
 use crate::profile::{ReceiptRule, Tone, derive::ReceiptFacts};
 use crate::query::{Facets, href};
@@ -187,7 +188,7 @@ pub(crate) fn receipts(view: &View, facets: &Facets) -> String {
     }
     body.push_str("<div class=\"table-wrap\"><table class=\"data receipts\"><thead><tr><th>Kind</th><th>At</th><th>Actor</th><th>Subject</th><th>Attempt</th><th>Details</th><th>Receipt</th></tr></thead><tbody>");
     for row in shown.iter().skip(current * PAGE_SIZE).take(PAGE_SIZE) {
-        body.push_str(&receipt_row(view, row));
+        body.push_str(&receipt_row(view, s, row));
     }
     body.push_str("</tbody></table></div>");
     if pages > 1 {
@@ -197,8 +198,7 @@ pub(crate) fn receipts(view: &View, facets: &Facets) -> String {
     page(view, "Receipts", "/receipts", &body)
 }
 
-fn receipt_row(view: &View, row: &Row) -> String {
-    let s = view.snapshot().expect("checked by the caller");
+fn receipt_row(view: &View, s: &Snapshot, row: &Row) -> String {
     let bead = &s.beads[row.index];
     let dash = || "<span class=\"muted\">—</span>".to_string();
     let at = row.at.as_deref().map(when).unwrap_or_else(dash);

@@ -339,10 +339,10 @@ pub fn attempt_events(events: &[Event]) -> Vec<Vec<&Event>> {
             && out
                 .last()
                 .is_some_and(|a| a.iter().any(|e| e.kind == "claim"));
-        if out.is_empty() || starts_new {
-            out.push(Vec::new());
+        match out.last_mut() {
+            Some(attempt) if !starts_new => attempt.push(event),
+            _ => out.push(vec![event]),
         }
-        out.last_mut().unwrap().push(event);
     }
     out
 }
