@@ -353,9 +353,8 @@ async fn start_with_timeout(tool: &Tool, timeout: Duration) -> Result<Api, Strin
 mod tests {
     use super::*;
     use crate::{
-        App,
+        app::{App, refresh_scrolls},
         model::{Feed, View},
-        refresh_scrolls,
     };
     use axum::{Router, extract::State, http::HeaderMap, response::IntoResponse, routing::get};
     use serde_json::json;
