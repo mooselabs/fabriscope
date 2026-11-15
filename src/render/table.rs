@@ -1,3 +1,5 @@
+// Owned by WP1 — Lists, groups, search, overview. Frozen signature:
+// `bead_table(&beads::Snapshot, Option<&provenance::Store>, &[(usize, &Bead)]) -> String`.
 //! The bead table every list of beads shares.
 
 use super::progress::compact;

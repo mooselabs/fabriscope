@@ -1,3 +1,6 @@
+// Owned by WP1 — Lists, groups, search, overview. Frozen signatures:
+// `beads(&View, &BeadFilter) -> String`, `epics(&View, &BeadFilter) -> String`
+// (WP1 may move both to `&Facets`; web/lists.rs is WP1's too).
 //! The bead list and the epics page.
 
 use super::layout::{not_found, page};

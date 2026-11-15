@@ -65,6 +65,9 @@ Open <http://127.0.0.1:8787>. Stop with Ctrl-C.
 | `--beads DIR` | A directory where `bd` finds the Beads store. Fabriscope starts a private `bd serve` there. |
 | `--beads-url URL` | A `bd serve` that is already running. |
 | `--parent-key PATH` | A dot-separated metadata path that names a bead's parent by id or external reference, for stores that keep membership in metadata instead of parent-child links. |
+| `--profile FILE` | A `fabriscope.profile.v1` file saying how the store uses its metadata: row classes, kinds, states, groups, people, panels, history events, receipts and links. See [docs/profile.md](docs/profile.md). |
+| `--runs URL\|DIR` | A run feed (`runfeed.v1`, see [docs/runfeed-v1.md](docs/runfeed-v1.md)) to show beside the work. |
+| `--runs-token-file FILE` | A bearer token for a `--runs` URL. |
 | `--beads-token-file FILE` | A bearer token for that `bd serve`, first non-empty line, re-read on every request. |
 | `--scrolls STORE` | A Scrolls store directory, usually `…/.scrolls`. |
 | `--bind ADDR` | Address to listen on. Default `127.0.0.1:8787`. |
@@ -76,6 +79,7 @@ Open <http://127.0.0.1:8787>. Stop with Ctrl-C.
 | `--version` | Print the version and the release target, then exit. |
 
 `fabriscope update` installs a newer release now, if there is one, and exits.
+`fabriscope profile check FILE` validates a profile and prints it resolved.
 
 ## Updates
 

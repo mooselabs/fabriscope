@@ -1,3 +1,4 @@
+// Owned by WP0 (frozen). Scroll pages are not part of the ledger-views slice.
 //! The scroll list and one scroll's page.
 
 use crate::app::App;

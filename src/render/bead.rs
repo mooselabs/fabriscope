@@ -1,10 +1,14 @@
+// Owned by WP2 — Bead page. Frozen signature:
+// `bead(&View, &str) -> Option<String>`.
 //! One bead's page.
 
 use super::fmt::words;
 use super::layout::page;
 use super::markdown::{Links, markdown};
+use super::panels::{banner, panels};
 use super::progress::progress_section;
 use super::table::bead_table;
+use super::timeline::timeline;
 use super::{badge, bead_link, escape, heading, scroll_link};
 use crate::beads::Bead;
 use crate::model::View;
@@ -69,7 +73,10 @@ pub fn bead(view: &View, id: &str) -> Option<String> {
         write!(body, "<span class=\"label\">{}</span>", escape(label)).unwrap();
     }
     body.push_str("</div>");
+    body.push_str(&banner(view, bead));
     body.push_str(&progress_section(view, bead));
+    body.push_str(&panels(view, bead));
+    body.push_str(&timeline(view, bead));
     let children = s.children(&bead.id);
     if !children.is_empty() {
         let open: Vec<_> = children

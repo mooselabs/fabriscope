@@ -129,12 +129,7 @@ pub(crate) async fn view_in_progress(app: &App) -> Vec<String> {
 /// Re-reads Beads when its change signal moves. A commit is a reliable
 /// signal, so a timed re-read is only a slow safety net; API stats are a
 /// hint, so the timer is shorter; with no signal at all, re-read every 30s.
-pub(crate) async fn watch_beads(
-    app: App,
-    reader: beads::Reader,
-    parent_key: Option<String>,
-    mut last: Option<String>,
-) {
+pub(crate) async fn watch_beads(app: App, reader: beads::Reader, mut last: Option<String>) {
     let mut refreshed = Instant::now();
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -152,7 +147,8 @@ pub(crate) async fn watch_beads(
         // The signal is taken before the read, so a change during the read
         // shows up as a new signal next time round.
         last = probe.map(|(signal, _)| signal);
-        let result = beads::load(&reader, parent_key.as_deref()).await;
+        let profile = app.view.read().await.profile.clone();
+        let result = beads::load(&reader, profile).await;
         refreshed = Instant::now();
         let ahead = result.as_ref().map(in_progress).unwrap_or_default();
         app.update(|view| {

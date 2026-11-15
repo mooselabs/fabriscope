@@ -1,3 +1,5 @@
+// Owned by WP1 — Lists, groups, search, overview. Frozen signature:
+// `overview(&View) -> String`.
 //! The overview page: headline counts, beads in progress, delivery and
 //! forecast, what is ready next, and knowledge.
 

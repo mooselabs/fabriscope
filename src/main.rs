@@ -2,13 +2,23 @@
 
 mod app;
 mod beads;
+mod costs;
+mod filters;
+mod flow;
+mod history;
 mod model;
+mod profile;
 mod provenance;
+mod query;
 mod render;
 mod routes;
+mod runs;
 mod scrolls;
 mod scrolls_http;
 mod serve;
+mod sweep;
+#[cfg(test)]
+mod testing;
 mod tools;
 mod update;
 mod web;
@@ -21,6 +31,7 @@ use tools::Tool;
 
 const USAGE: &str = "Usage: fabriscope [--beads DIR | --beads-url URL] [--scrolls STORE | --scrolls-url URL] [options]
        fabriscope update
+       fabriscope profile check FILE
 
 View a Beads store, a Scrolls store, or both, in a web browser. Release
 builds update themselves in the background; `fabriscope update` updates now.
@@ -30,7 +41,12 @@ builds update themselves in the background; `fabriscope update` updates now.
   --beads-url URL      A `bd serve` that is already running
   --beads-token-file F Bearer token file for that `bd serve`
   --parent-key PATH    Metadata path naming a bead's parent (by id or external
-                       reference), for stores without parent-child links
+                       reference), for stores without parent-child links;
+                       wins over the profile's [parent]
+  --profile FILE       A fabriscope.profile.v1 file saying how the store uses
+                       its metadata (see docs/profile.md)
+  --runs URL|DIR       A run feed (runfeed.v1, see docs/runfeed-v1.md)
+  --runs-token-file F  Bearer token file for a --runs URL
   --scrolls STORE      Start private scrolls serve for this store
   --scrolls-url URL    Attach to an existing loopback scrolls serve
   --bind ADDR          Address to listen on (default 127.0.0.1:8787)
@@ -60,6 +76,11 @@ struct Config {
     version: bool,
     /// `fabriscope update`: install a newer release now and exit.
     update: bool,
+    profile: Option<PathBuf>,
+    runs: Option<String>,
+    runs_token_file: Option<PathBuf>,
+    /// `fabriscope profile check FILE`: validate, print and exit.
+    profile_check: Option<PathBuf>,
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> {
@@ -72,6 +93,16 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
         }
         config.update = true;
         return Ok(config);
+    }
+    if args.peek().map(String::as_str) == Some("profile") {
+        args.next();
+        return match (args.next().as_deref(), args.next(), args.next()) {
+            (Some("check"), Some(file), None) => {
+                config.profile_check = Some(file.into());
+                Ok(config)
+            }
+            _ => Err("use: fabriscope profile check FILE".into()),
+        };
     }
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value"));
@@ -95,6 +126,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
             "--bd" => config.bd = Some(value("--bd")?.into()),
             "--scrolls-bin" => config.scrolls_bin = Some(value("--scrolls-bin")?.into()),
             "--scrolls-dolt" => config.scrolls_dolt = Some(value("--scrolls-dolt")?.into()),
+            "--profile" => config.profile = Some(value("--profile")?.into()),
+            "--runs" => config.runs = Some(value("--runs")?),
+            "--runs-token-file" => {
+                config.runs_token_file = Some(value("--runs-token-file")?.into())
+            }
             "--no-update" => config.no_update = true,
             "--help" | "-h" => config.help = true,
             "--version" | "-V" => config.version = true,
@@ -201,6 +237,26 @@ async fn run() -> Result<(), String> {
     if config.update {
         return update_now().await;
     }
+    if let Some(file) = &config.profile_check {
+        let profile = profile::Profile::load(file)?;
+        println!("{}: a valid {} profile", file.display(), profile::SCHEMA);
+        println!("{}", profile.describe());
+        return Ok(());
+    }
+    let mut profile = match &config.profile {
+        Some(file) => profile::Profile::load(file)?,
+        None => profile::Profile::default(),
+    };
+    profile.set_parent_key(config.parent_key.as_deref())?;
+    let profile = Arc::new(profile);
+    let runs_source = config
+        .runs
+        .as_deref()
+        .map(|r| runs::Source::parse(r, config.runs_token_file.clone()))
+        .transpose()?;
+    if runs_source.is_none() && config.runs_token_file.is_some() {
+        return Err("--runs-token-file needs --runs URL".into());
+    }
     let beads_reader = beads_reader(&config).await?;
     let scrolls_store = config
         .scrolls
@@ -223,9 +279,7 @@ async fn run() -> Result<(), String> {
     let (beads, scrolls) = tokio::join!(
         async {
             match &beads_reader {
-                Some(reader) => beads::load(reader, config.parent_key.as_deref())
-                    .await
-                    .map(Some),
+                Some(reader) => beads::load(reader, profile.clone()).await.map(Some),
                 None => Ok(None),
             }
         },
@@ -260,6 +314,30 @@ async fn run() -> Result<(), String> {
     let scrolls_checked_at = scrolls.as_ref().map(|s| s.generated_at.clone());
     let provenance_tool = beads_reader.as_ref().and_then(|r| r.local()).cloned();
     let ahead = beads.as_ref().map(in_progress).unwrap_or_default();
+    // A directory feed is read once here so pages have it from the start;
+    // `runs::client` (WP5) keeps it current. A feed that cannot be read is
+    // shown as an error, not refused: it may not be published yet.
+    let runs = match &runs_source {
+        Some(dir @ runs::Source::Dir(_)) => {
+            let source = dir.clone();
+            let read = tokio::task::spawn_blocking(move || runs::load(&source))
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r);
+            Some(match read {
+                Ok(index) => Feed {
+                    data: Arc::new(index),
+                    error: None,
+                },
+                Err(error) => Feed {
+                    data: Arc::default(),
+                    error: Some(format!("Run feed read failed. {error}")),
+                },
+            })
+        }
+        Some(runs::Source::Url { .. }) => Some(Feed::default()),
+        None => None,
+    };
     let mut app = App::new(View {
         title,
         beads: beads.map(|data| Feed {
@@ -275,7 +353,12 @@ async fn run() -> Result<(), String> {
             .as_ref()
             .map(|_| provenance::Store::default()),
         revision: 1,
+        history: beads_reader.as_ref().map(|_| history::Store::default()),
+        runs,
+        profile,
+        run_cache: Arc::default(),
     });
+    let provenance_ready = provenance_tool.is_some();
     if let Some(tool) = provenance_tool {
         app = app.with_provenance(tool);
     }
@@ -294,13 +377,15 @@ async fn run() -> Result<(), String> {
     let address = listener.local_addr().map_err(|e| e.to_string())?;
     println!("Fabriscope: http://{address}{summary}");
     app.want_provenance(ahead).await;
+    if provenance_ready {
+        sweep::spawn(app.clone());
+    }
     if let Some(reader) = beads_reader {
-        tokio::spawn(watch_beads(
-            app.clone(),
-            reader,
-            config.parent_key.clone(),
-            first_signal,
-        ));
+        history::reader::spawn(app.clone(), &reader);
+        tokio::spawn(watch_beads(app.clone(), reader, first_signal));
+    }
+    if let Some(source) = runs_source {
+        runs::client::spawn(app.clone(), source);
     }
     let scrolls_watch = scrolls_api
         .as_ref()
@@ -385,6 +470,18 @@ mod tests {
         assert!(args(&["--frobnicate"]).is_err());
         assert!(args(&["--scrolls-url", "http://127.0.0.1:9"]).is_ok());
         assert!(args(&["--scrolls", "/tmp", "--scrolls-url", "http://127.0.0.1:9"]).is_err());
+    }
+
+    #[test]
+    fn profile_and_runs_flags_and_the_profile_check_command() {
+        let config = args(&["--beads", "/tmp", "--profile", "p.toml", "--runs", "feed"]).unwrap();
+        assert_eq!(config.profile, Some("p.toml".into()));
+        assert_eq!(config.runs.as_deref(), Some("feed"));
+        let check = args(&["profile", "check", "p.toml"]).unwrap();
+        assert_eq!(check.profile_check, Some("p.toml".into()));
+        assert!(args(&["profile", "check"]).is_err());
+        assert!(args(&["profile", "lint", "p.toml"]).is_err());
+        assert!(args(&["profile", "check", "a", "b"]).is_err());
     }
 
     #[test]

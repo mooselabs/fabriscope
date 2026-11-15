@@ -3,9 +3,16 @@
 
 Requires playwright; run `playwright install chromium` once, then
 `python3 tests/theme.py --binary target/debug/fabriscope`.
+
+After the theme checks, every `tests/browser_*.py` is imported and its
+`check(page, url)` run against a second server: the neutral work-ledger
+fixture (tests/fixtures/work/) with its profile and the golden run feed. A
+package adds its own browser checks as one such file.
 """
 
 import argparse
+import contextlib
+import importlib.util
 import shutil
 import subprocess
 import tempfile
@@ -70,6 +77,80 @@ esac
                 server.terminate()
                 server.wait(timeout=10)
     print('Theme browser checks passed')
+    checks = sorted(Path(__file__).resolve().parent.glob('browser_*.py'))
+    if checks:
+        with work_server(args.binary) as url:
+            run_checks(args, url, checks)
+        print(f'Browser checks passed: {", ".join(c.stem for c in checks)}')
+
+
+def wait_for_address(log, server):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        log.seek(0)
+        for line in log:
+            if 'http://127.0.0.1:' in line:
+                return line[line.index('http://127.0.0.1:'):].split()[0]
+        assert server.poll() is None, 'Server exited during startup'
+        time.sleep(0.05)
+    raise AssertionError('Server did not announce its address')
+
+
+@contextlib.contextmanager
+def work_server(binary):
+    """The work-ledger fixture through a fake `bd export`, with its profile
+    and the golden run feed."""
+    fixtures = ROOT / 'tests/fixtures/work'
+    with tempfile.TemporaryDirectory(prefix='fabriscope-work-') as scratch:
+        store = Path(scratch)
+        for name in ['issues.jsonl', 'ready.json', 'provenance-wk-1.json',
+                     'provenance-wk-2.json', 'provenance-wk-3.json']:
+            shutil.copy(fixtures / name, store / name)
+        (store / 'commit.json').write_text('{"commit":"work"}')
+        bd = store / 'bd'
+        bd.write_text('''#!/bin/sh
+case "$1" in
+  serve) echo 'Error: test uses export' >&2; exit 1 ;;
+  export) cat issues.jsonl ;;
+  ready) cat ready.json ;;
+  vc) cat commit.json ;;
+  provenance) if [ -f "provenance-$5.json" ]; then cat "provenance-$5.json"; else echo '[]'; fi ;;
+  *) exit 2 ;;
+esac
+''')
+        bd.chmod(0o755)
+        with (store / 'server.log').open('w+') as log:
+            server = subprocess.Popen([
+                str(binary.resolve()), '--beads', str(store), '--bd', str(bd),
+                '--profile', str(fixtures / 'profile.toml'),
+                '--runs', str(ROOT / 'tests/fixtures/runfeed/v1'),
+                '--title', 'Work', '--bind', '127.0.0.1:0', '--no-update',
+            ], stdout=log, stderr=log)
+            try:
+                yield wait_for_address(log, server)
+            finally:
+                server.terminate()
+                server.wait(timeout=10)
+
+
+def run_checks(args, url, checks):
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(executable_path=args.browser)
+        try:
+            for path in checks:
+                spec = importlib.util.spec_from_file_location(path.stem, path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                context = browser.new_context(viewport={'width': 1440, 'height': 1000})
+                page = context.new_page()
+                errors = []
+                page.on('pageerror', lambda error: errors.append(str(error)))
+                page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' and not msg.location.get('url', '').endswith('/favicon.ico') else None)
+                module.check(page, url)
+                assert not errors, (path.stem, errors)
+                context.close()
+        finally:
+            browser.close()
 
 
 def run_browser(args, url, issues, store):

@@ -1,3 +1,6 @@
+// Owned by WP2 — Bead page. Frozen signatures:
+// `compact(&provenance::Store, &Bead, DateTime<Utc>) -> Option<(String, String)>`,
+// `progress_section(&View, &Bead) -> String`.
 //! Where a bead is up to, from its provenance log: the stage bar, the
 //! compact bar in tables, and the progress section of a bead's page.
 

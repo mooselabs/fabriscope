@@ -20,7 +20,15 @@ use tokio_stream::{StreamExt, wrappers::WatchStream};
 
 /// The stylesheet served at `/app.css` is these files joined in this order,
 /// so each area keeps its own file. Append new area files here.
-const CSS_PARTS: &[&str] = &[include_str!("../static/css/base.css")];
+const CSS_PARTS: &[&str] = &[
+    include_str!("../static/css/base.css"),
+    include_str!("../static/css/lists.css"),
+    include_str!("../static/css/bead.css"),
+    include_str!("../static/css/people.css"),
+    include_str!("../static/css/flow.css"),
+    include_str!("../static/css/runs.css"),
+    include_str!("../static/css/factory.css"),
+];
 
 /// `CSS_PARTS` joined once, on first use.
 fn stylesheet() -> &'static str {
@@ -66,6 +74,17 @@ async fn health(State(app): State<App>) -> Response {
             "failed": p.trails.values().filter(|t| t.error.is_some()).count(),
         })
     });
+    let profile = serde_json::json!({
+        "name": view.profile.name,
+        "schema": view.profile.schema,
+        "states": view.profile.states.len(),
+        "groups": view.profile.groups.len(),
+    });
+    let runs = view.runs.as_ref().map(|f| {
+        let mut status = f.data.status();
+        status["error"] = serde_json::json!(f.error);
+        status
+    });
     let update = app
         .installed
         .lock()
@@ -81,6 +100,9 @@ async fn health(State(app): State<App>) -> Response {
             "beads": beads,
             "provenance": provenance,
             "scrolls": scrolls,
+            "profile": profile,
+            "history": view.history.as_ref().map(|h| h.status()),
+            "runs": runs,
         })),
     )
         .into_response()
@@ -116,6 +138,11 @@ pub fn router(app: App) -> Router {
         .merge(web::lists::routes())
         .merge(web::bead::routes())
         .merge(web::scrolls::routes())
+        .merge(web::activity::routes())
+        .merge(web::people::routes())
+        .merge(web::flow::routes())
+        .merge(web::runs::routes())
+        .merge(web::factory::routes())
         .route("/events", get(events))
         .route("/healthz", get(health))
         .route(
@@ -197,6 +224,68 @@ mod tests {
             let (actual, headers, _) = get(&app, path).await;
             assert_eq!(actual.as_u16(), status, "{path}");
             assert!(headers.contains_key("content-security-policy"), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn every_tab_and_stub_route_answers_and_the_stylesheet_joins_its_parts() {
+        let app = App::new(crate::testing::work_view());
+        let mut paths: Vec<String> = crate::render::layout::sections(&*app.view.read().await)
+            .into_iter()
+            .flat_map(|s| s.tabs.into_iter().map(|(path, _)| path))
+            .collect();
+        assert_eq!(
+            paths.len(),
+            17,
+            "every tab of a profiled view with a run feed: {paths:?}"
+        );
+        paths.extend(
+            [
+                "/by/milestone/v1",
+                "/by/rig",
+                "/person/factory%2FhostA%2FrigA",
+                "/run/run-0002",
+                "/run/run-0002/doc/transcript?page=1",
+                "/boards/stop-ratio",
+                "/search?q=csv&milestone=v1",
+                "/bead/wk-1",
+                "/beads?state=all",
+            ]
+            .map(String::from),
+        );
+        for path in &paths {
+            let (status, _, body) = get(&app, path).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+            assert!(body.contains("aria-label=\"Main navigation\""), "{path}");
+            assert!(
+                !body.contains(" style="),
+                "{path}: the CSP forbids inline styles"
+            );
+        }
+        assert_eq!(get(&app, "/by/nope").await.0, StatusCode::NOT_FOUND);
+        let (_, _, css) = get(&app, "/app.css").await;
+        assert!(css.starts_with(include_str!("../static/css/base.css")));
+        assert!(css.ends_with(include_str!("../static/css/factory.css")));
+        let (_, _, health) = get(&app, "/healthz").await;
+        let health: serde_json::Value = serde_json::from_str(&health).unwrap();
+        assert_eq!(health["runs"]["revision"], 42);
+        assert_eq!(health["profile"]["name"], "Work ledger (fixture)");
+        assert!(health["history"]["read"].as_u64().unwrap() > 0);
+        let bare = App::new(View {
+            beads: Some(Feed::default()),
+            ..Default::default()
+        });
+        for (path, status) in [
+            ("/runs", 404),
+            ("/run/run-0002", 404),
+            ("/boards", 404),
+            ("/flow", 200),
+        ] {
+            assert_eq!(
+                get(&bare, path).await.0.as_u16(),
+                status,
+                "{path} without a run feed"
+            );
         }
     }
 

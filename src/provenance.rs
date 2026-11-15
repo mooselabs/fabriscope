@@ -222,6 +222,94 @@ pub struct Stage {
     pub mark: Mark,
     pub at: Option<String>,
     pub facts: Vec<Fact>,
+    /// Payload facts the stage bar does not show yet: a claim's `rig` and
+    /// `generation`, a cut's `formula`, as (key, display text).
+    pub details: Vec<(String, String)>,
+}
+
+/// Payload keys kept as stage details, by event kind.
+const DETAIL_KEYS: [(&str, &[&str]); 2] =
+    [("claim", &["rig", "generation"]), ("cut", &["formula"])];
+
+/// What an attempt used, summed over its `used` events. Each field is the
+/// payload key of the same name (`dollars`, `tokens`, `wall_seconds`,
+/// `gate_runs`, `gate_seconds`, `gate_reused`, `gate_saved_seconds`); a
+/// missing key adds nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Usage {
+    pub dollars: f64,
+    pub tokens: u64,
+    pub wall_seconds: u64,
+    pub gate_runs: u64,
+    pub gate_seconds: u64,
+    pub gate_reused: u64,
+    pub gate_saved_seconds: u64,
+    /// How many `used` events were summed; zero means nothing is known.
+    pub events: usize,
+}
+
+impl Usage {
+    /// One `used` event's usage; other kinds give nothing.
+    pub fn of(event: &Event) -> Self {
+        if event.kind != "used" {
+            return Self::default();
+        }
+        let fields = event.object().unwrap_or_default();
+        let number = |key: &str| fields.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+        let whole = |key: &str| number(key).max(0.0).round() as u64;
+        Self {
+            dollars: number("dollars"),
+            tokens: whole("tokens"),
+            wall_seconds: whole("wall_seconds"),
+            gate_runs: whole("gate_runs"),
+            gate_seconds: whole("gate_seconds"),
+            gate_reused: whole("gate_reused"),
+            gate_saved_seconds: whole("gate_saved_seconds"),
+            events: 1,
+        }
+    }
+
+    /// Adds `other` into this total.
+    pub fn add(&mut self, other: &Usage) {
+        self.dollars += other.dollars;
+        self.tokens += other.tokens;
+        self.wall_seconds += other.wall_seconds;
+        self.gate_runs += other.gate_runs;
+        self.gate_seconds += other.gate_seconds;
+        self.gate_reused += other.gate_reused;
+        self.gate_saved_seconds += other.gate_saved_seconds;
+        self.events += other.events;
+    }
+
+    fn sum<'a>(events: impl IntoIterator<Item = &'a &'a Event>) -> Self {
+        let mut total = Self::default();
+        for event in events {
+            total.add(&Self::of(event));
+        }
+        total
+    }
+}
+
+/// The attempt id an attempt's events carry: the `ref` of a `cut` or
+/// `used` with `ref_kind` `work-id`, else an `attempt` payload key.
+fn attempt_id(events: &[&Event]) -> Option<String> {
+    events
+        .iter()
+        .find(|e| {
+            (e.kind == "cut" || e.kind == "used")
+                && e.ref_kind == "work-id"
+                && !e.reference.is_empty()
+        })
+        .map(|e| e.reference.clone())
+        .or_else(|| {
+            events.iter().find_map(|e| {
+                e.object()?
+                    .get("attempt")?
+                    .as_str()
+                    .filter(|a| !a.is_empty())
+                    .map(String::from)
+            })
+        })
 }
 
 /// The steps toward closed, each with the event kind that shows it reached.
@@ -277,11 +365,25 @@ fn stages(bead: &Bead, events: &[&Event], closed: bool, stopped: bool, active: b
                     )
                 }
             };
+            let details = DETAIL_KEYS
+                .iter()
+                .find(|(k, _)| k == kind)
+                .and_then(|(k, keys)| {
+                    let event = events.iter().find(|e| e.kind == *k)?;
+                    let fields = event.field_text(&[]);
+                    Some(
+                        keys.iter()
+                            .filter_map(|key| fields.iter().find(|(f, _)| f == key).cloned())
+                            .collect(),
+                    )
+                })
+                .unwrap_or_default();
             Stage {
                 label,
                 mark: if done { Mark::Done } else { Mark::Pending },
                 at,
                 facts,
+                details,
             }
         })
         .collect();
@@ -326,6 +428,7 @@ fn stages(bead: &Bead, events: &[&Event], closed: bool, stopped: bool, active: b
         },
         at: used.first().map(|e| e.occurred_at.clone()),
         facts,
+        details: Vec::new(),
     });
     out
 }
@@ -366,8 +469,13 @@ pub struct Stop {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attempt {
     pub number: usize,
+    /// The attempt id from its events (see `attempt_id`), which run feeds
+    /// and receipts use to join.
+    pub id: Option<String>,
     pub stages: Vec<Stage>,
     pub stop: Option<Stop>,
+    /// What this attempt used.
+    pub usage: Usage,
 }
 
 /// Where a bead is up to, from its provenance.
@@ -385,6 +493,10 @@ pub struct Progress {
     pub earlier: Vec<Attempt>,
     /// How many times the bead was claimed.
     pub claims: usize,
+    /// The id and usage of the attempt `stages` shows (none for a fresh
+    /// attempt awaiting a claim).
+    pub attempt: Option<String>,
+    pub current_usage: Usage,
 }
 
 fn ending(events: &[&Event]) -> Option<Stop> {
@@ -432,13 +544,17 @@ impl Progress {
                 let stop = ending(events);
                 Attempt {
                     number: i + 1,
+                    id: attempt_id(events),
                     stages: stages(bead, events, false, stop.is_some(), false),
                     stop,
+                    usage: Usage::sum(events),
                 }
             })
             .collect();
         let closed = bead.is_closed();
         let stop = if closed { None } else { ending(&latest) };
+        let mut attempt = attempt_id(&latest);
+        let mut current_usage = Usage::sum(&latest);
         let (shown, since, held) = match stop {
             Some(stop) if stop.resumed.is_some() || stop.stop.kind == "handoff" => {
                 let freed = stop
@@ -448,8 +564,10 @@ impl Progress {
                     .unwrap_or_else(|| stop.stop.at.clone());
                 earlier.push(Attempt {
                     number: earlier.len() + 1,
+                    id: attempt.take(),
                     stages: stages(bead, &latest, false, true, false),
                     stop: Some(stop),
+                    usage: std::mem::take(&mut current_usage),
                 });
                 (stages(bead, &[], false, false, true), Some(freed), None)
             }
@@ -470,7 +588,22 @@ impl Progress {
             held,
             earlier,
             claims,
+            attempt,
+            current_usage,
         }
+    }
+
+    /// Usage over every attempt, earlier ones included.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "WP2 and WP6 total it (BKLG-20261115-4e2r)")
+    )]
+    pub fn usage(&self) -> Usage {
+        let mut total = self.current_usage;
+        for attempt in &self.earlier {
+            total.add(&attempt.usage);
+        }
+        total
     }
 
     /// The step now due or stopped at, if any.
@@ -883,5 +1016,45 @@ mod tests {
             store.wants_read(&b, now + Duration::minutes(1)),
             "failures retry sooner"
         );
+    }
+
+    #[test]
+    fn usage_totals_and_attempt_ids_come_from_string_payloads() {
+        // The ledger sends payloads as JSON-encoded strings: parsed twice.
+        let events = parse(include_str!("../tests/fixtures/work/provenance-wk-2.json")).unwrap();
+        assert!(matches!(events[2].payload, Value::String(_)));
+        let p = Progress::new(&bead("closed"), &events);
+        assert_eq!(p.earlier.len(), 1);
+        assert_eq!(p.earlier[0].id.as_deref(), Some("att-0002-1"));
+        assert_eq!(p.attempt.as_deref(), Some("att-0002-2"));
+        assert_eq!(p.earlier[0].usage.tokens, 900_000);
+        let total = p.usage();
+        assert_eq!(total.events, 2);
+        assert!((total.dollars - 5.37).abs() < 1e-9, "{}", total.dollars);
+        assert_eq!(total.gate_runs, 3);
+        assert_eq!(total.gate_reused, 1);
+        assert_eq!(total.wall_seconds, 3600 + 9000);
+        let claimed = &p.stages[1];
+        assert_eq!(
+            claimed.details,
+            [
+                ("rig".to_string(), "rigA".to_string()),
+                ("generation".into(), "2".into())
+            ]
+        );
+        assert_eq!(
+            p.stages[2].details,
+            [("formula".to_string(), "build".to_string())]
+        );
+        // An attempt id in a payload is found when no work-id ref is.
+        let land = event(
+            "land",
+            "2026-11-15T05:00:00Z",
+            "",
+            "",
+            r#"{"attempt":"x:1@t"}"#,
+        );
+        assert_eq!(attempt_id(&[&land]).as_deref(), Some("x:1@t"));
+        assert_eq!(Usage::of(&land), Usage::default());
     }
 }
