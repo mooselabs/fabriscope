@@ -1,1 +1,162 @@
 /* Owned by WP4 — Flow. Area styles only; shared classes live in base.css. */
+.flow-tabs,.flow-presets,.flow-by {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+  margin:0 0 14px;
+  font-size:13px;
+}
+.flow-tabs {
+  border-bottom:1px solid var(--line);
+  padding-bottom:12px;
+  margin-bottom:18px;
+}
+.flow-tabs a,.flow-presets a,.flow-by a {
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:5px 12px;
+  background:var(--paper);
+  color:var(--ink);
+  min-height:32px;
+  display:inline-flex;
+  align-items:center;
+}
+.flow-tabs a:hover,.flow-presets a:hover,.flow-by a:hover {
+  text-decoration:none;
+  border-color:var(--hover-border);
+}
+.flow-tabs a[aria-current],.flow-presets a[aria-current],.flow-by a[aria-current] {
+  background:var(--badge-blue-bg);
+  border-color:var(--badge-open-border);
+  color:var(--badge-blue);
+  font-weight:550;
+}
+.flow-presets>span,.flow-by>span {
+  margin-right:4px;
+}
+.flow-filters {
+  margin-bottom:28px;
+}
+.flow-clear {
+  align-self:center;
+  font-size:13px;
+}
+.flow-cards {
+  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+  margin:0 0 8px;
+}
+.flow-cards .metric strong {
+  font-size:30px;
+}
+.flow-cards .metric strong .unknown {
+  font-size:16px;
+  vertical-align:middle;
+}
+.flow .unknown {
+  display:inline-block;
+  border:1px dashed var(--control-border);
+  border-radius:4px;
+  padding:0 6px;
+  color:var(--muted);
+  font-style:italic;
+  font-weight:400;
+  letter-spacing:0;
+}
+.left-out {
+  color:var(--muted);
+  font-size:13px;
+  margin:4px 0 0;
+}
+.chart-scroll {
+  overflow-x:auto;
+  max-width:100%;
+}
+.chart-scroll .chart.grouped {
+  min-width:640px;
+}
+.chart.grouped text {
+  font-size:11px;
+}
+.flow-stats {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:16px;
+}
+.flow-stat {
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:18px 22px;
+}
+.flow-stat h3 {
+  font-size:14px;
+  margin:0 0 10px;
+}
+.flow-stat dl {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 28px;
+  margin:0 0 8px;
+}
+.flow-stat dt {
+  color:var(--muted);
+  font-size:12px;
+}
+.flow-stat dd {
+  margin:0;
+  font-size:22px;
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.flow-people {
+  list-style:none;
+  padding:0;
+  margin:0;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 16px;
+  font-size:13px;
+}
+.flow-people a[aria-current] {
+  font-weight:600;
+}
+.flow-table td small {
+  overflow-wrap:anywhere;
+}
+.flow-table tr.stale td {
+  background:var(--badge-amber-bg);
+}
+.flow-table tr.held td:first-child {
+  box-shadow:inset 3px 0 0 var(--red);
+}
+.flow-table td.age {
+  white-space:nowrap;
+}
+.flow-table meter {
+  display:block;
+  width:120px;
+  height:8px;
+  margin-top:4px;
+}
+@media(max-width:700px) {
+  .flow-cards {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .flow-table meter {
+    width:80px;
+  }
+}
+.chart-scroll .chart {
+  min-width:560px;
+}
+.flow-table td:first-child {
+  min-width:180px;
+  overflow-wrap:normal;
+}
+.flow-table td:first-child small {
+  overflow-wrap:anywhere;
+}
+.flow .unknown,.flow-table .badge {
+  white-space:nowrap;
+}
