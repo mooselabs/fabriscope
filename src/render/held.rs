@@ -201,8 +201,8 @@ pub(crate) fn held(view: &View, facets: &Facets) -> String {
     let now = Utc::now();
     // Rows per held state, single pass.
     let mut rows: Vec<Vec<usize>> = vec![Vec::new(); held.len()];
-    for i in 0..s.beads.len() {
-        let states = &s.derived.rows[i].states;
+    for (i, row) in s.derived.rows.iter().enumerate() {
+        let states = &row.states;
         if states.is_empty() || !facets.matches(view, i) {
             continue;
         }
@@ -466,12 +466,11 @@ fn stop_history(view: &View, facets: &Facets, now: DateTime<Utc>) -> String {
     let mut suspends = Vec::new();
     let mut resumed: Vec<f64> = Vec::new();
     let mut open = 0;
-    for i in 0..s.beads.len() {
+    for (i, bead) in s.beads.iter().enumerate() {
         if !items.matches(view, i) {
             continue;
         }
         considered += 1;
-        let bead = &s.beads[i];
         if let Some(thread) = view.thread(&bead.id) {
             threads += 1;
             for event in thread.events.iter().filter(|e| e.flags.stop) {
