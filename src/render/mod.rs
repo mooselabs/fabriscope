@@ -408,7 +408,20 @@ pub(crate) fn facets_form(view: &View, facets: &Facets, path: &str) -> String {
     if epics.len() > 1 {
         out.push_str(&select("epic", "Epic", &facets.epic, &epics));
     }
-    for group in &view.profile.groups {
+    // A profile may define many groups. The first few stay in view; the
+    // rest fold away unless one of them is filtering.
+    const SHOWN: usize = 3;
+    let folded = view.profile.groups.len() > SHOWN;
+    for (n, group) in view.profile.groups.iter().enumerate() {
+        if folded && n == SHOWN {
+            let open = view.profile.groups[SHOWN..]
+                .iter()
+                .any(|g| facets.groups.get(&g.key).is_some_and(|v| !v.is_empty()));
+            out.push_str(&format!(
+                "<details class=\"more-filters\" id=\"more-filters\"{}><summary>More filters</summary><div class=\"filters-more\">",
+                if open { " open" } else { "" }
+            ));
+        }
         let mut values = all(&format!("Any {}", group.label.to_lowercase()));
         if let Some(index) = s.derived.groups.get(&group.key) {
             values.extend(
@@ -423,6 +436,9 @@ pub(crate) fn facets_form(view: &View, facets: &Facets, path: &str) -> String {
             .map(String::as_str)
             .unwrap_or("");
         out.push_str(&select(&group.key, &group.label, current, &values));
+    }
+    if folded {
+        out.push_str("</div></details>");
     }
     out.push_str("<button type=\"submit\">Apply</button></form>");
     out

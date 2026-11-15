@@ -420,6 +420,22 @@ summary>span:last-child {
   flex:1;
   min-width:180px;
 }
+.filters .more-filters {
+  flex-basis:100%;
+  color:var(--muted);
+  font-size:12px;
+}
+.filters .more-filters summary {
+  cursor:pointer;
+  width:max-content;
+}
+.filters .filters-more {
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+  align-items:end;
+  margin-top:12px;
+}
 input,select,button {
   font:inherit;
   font-size:14px;

@@ -105,7 +105,7 @@ pub fn overview(view: &View) -> String {
             cards.push((
                 state.label.as_str(),
                 *n,
-                "never ready while so",
+                "held back from ready",
                 format!("/beads?dstate={}", url(&state.key)),
             ));
         }
