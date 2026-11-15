@@ -1,16 +1,20 @@
 // Owned by WP1 — Lists, groups, search, overview. Frozen signature:
 // `overview(&View) -> String`.
-//! The overview page: headline counts, beads in progress, delivery and
-//! forecast, what is ready next, and knowledge.
+//! The overview page: headline counts, work under way (in progress and
+//! held), a strip for the profile's first group, delivery and forecast,
+//! what is ready next, and knowledge. Every count is of items: receipt and
+//! hidden rows are never counted.
 
 use super::layout::page;
 use super::progress::compact;
 use super::scrolls::scroll_table;
 use super::svg::chart;
 use super::table::bead_table;
-use super::{bead_link, escape, fmt::words, heading, metrics, url};
+use super::{bead_link, escape, fmt::words, heading, metrics, tone_badge, url};
 use crate::beads::{self, Bead};
+use crate::filters::{Counts, group_bead, holding};
 use crate::model::View;
+use crate::profile::StateRule;
 use crate::scrolls::{self, Scroll};
 use std::fmt::Write;
 
@@ -32,7 +36,7 @@ fn forecast_values(current: usize, change: f64) -> ([usize; 3], String) {
     (remaining, date)
 }
 
-fn velocity(s: &beads::Snapshot) -> String {
+fn velocity(s: &beads::Snapshot, open: usize) -> String {
     let history = &s.history;
     let mut out = "<section id=\"velocity\"><h2>Delivery &amp; forecast</h2>".to_string();
     out.push_str(&chart(history));
@@ -51,7 +55,6 @@ fn velocity(s: &beads::Snapshot) -> String {
         if let Some(w) = history.windows.iter().find(|w| w.days == 7) {
             scenarios.push(("Last 7 days continue", w.net_change as f64 / w.days as f64));
         }
-        let open = s.count(|b| !b.is_closed());
         for (label, change) in scenarios {
             let (values, date) = forecast_values(open, change);
             write!(out, "<tr><td>{label}</td><td>{change:+.1}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", values[0], values[1], values[2], escape(&date)).unwrap();
@@ -70,34 +73,46 @@ pub fn overview(view: &View) -> String {
     );
     if let Some(feed) = &view.beads {
         let s = &feed.data;
-        body.push_str(&metrics(&[
+        let hold = holding(&view.profile);
+        let counts = Counts::of(s, 0..s.beads.len(), &hold, |_| true);
+        let mut cards = vec![
             (
                 "Open beads",
-                s.count(|b| !b.is_closed()),
+                counts.open,
                 "everything not closed",
-                "/beads".into(),
+                "/beads".to_string(),
             ),
             (
                 "Ready",
-                s.ready.len(),
+                counts.ready,
                 "as bd ready decides",
                 "/beads?ready=yes".into(),
             ),
             (
                 "In progress",
-                s.count(|b| b.status == "in_progress"),
+                counts.working,
                 "being worked on",
                 "/beads?state=in_progress".into(),
             ),
             (
                 "Waiting",
-                s.count(|b| b.status == "open" && !b.ready),
+                counts.waiting,
                 "open, but not ready",
                 "/beads?state=open&ready=no".into(),
             ),
-        ]));
-        body.push_str(&in_progress(view, s));
-        body.push_str(&velocity(s));
+        ];
+        for (state, n) in hold.iter().zip(&counts.held) {
+            cards.push((
+                state.label.as_str(),
+                *n,
+                "never ready while so",
+                format!("/beads?dstate={}", url(&state.key)),
+            ));
+        }
+        body.push_str(&metrics(&cards));
+        body.push_str(&under_way(view, s, &hold));
+        body.push_str(&group_strip(view, s, &hold));
+        body.push_str(&velocity(s, counts.open));
         body.push_str(&ready_next(s));
     }
     if let Some(feed) = &view.scrolls {
@@ -106,10 +121,66 @@ pub fn overview(view: &View) -> String {
     page(view, "Overview", "/", &body)
 }
 
+/// Values of the profile's first group, most open first, with how each
+/// stands; at most `STRIP` values.
+fn group_strip(view: &View, s: &beads::Snapshot, hold: &[&StateRule]) -> String {
+    const STRIP: usize = 12;
+    let Some(group) = view.profile.groups.first() else {
+        return String::new();
+    };
+    let Some(values) = s.derived.groups.get(&group.key) else {
+        return String::new();
+    };
+    let mut rows: Vec<(&String, Counts)> = values
+        .iter()
+        .map(|(value, members)| {
+            (
+                value,
+                Counts::of(s, members.iter().copied(), hold, |_| true),
+            )
+        })
+        .collect();
+    rows.sort_by(|a, b| b.1.open.cmp(&a.1.open).then(a.0.cmp(b.0)));
+    let path = format!("/by/{}", url(&group.key));
+    let mut out = format!(
+        "<section id=\"by-group\"><div class=\"section-heading\"><div><h2>By {}</h2><p class=\"muted\">{} of {} values, most open first.</p></div><a href=\"{}\">Every {} →</a></div><div class=\"table-wrap\"><table class=\"data group-strip\"><thead><tr><th>{}</th><th class=\"num\">Open</th><th class=\"num\">Ready</th><th class=\"num\">Working</th>",
+        escape(&group.label.to_lowercase()),
+        rows.len().min(STRIP),
+        rows.len(),
+        escape(&path),
+        escape(&group.label.to_lowercase()),
+        escape(&group.label)
+    );
+    for state in hold {
+        write!(out, "<th class=\"num\">{}</th>", escape(&state.label)).unwrap();
+    }
+    out.push_str("<th class=\"num\">Closed</th></tr></thead><tbody>");
+    for (value, c) in rows.iter().take(STRIP) {
+        let title = group_bead(s, group, value)
+            .map(|b| format!("<small>{}</small>", escape(&b.title)))
+            .unwrap_or_default();
+        write!(
+            out,
+            "<tr><td>{}{title}</td><td class=\"num\">{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td>",
+            super::group_link(&group.key, value, value),
+            c.open,
+            c.ready,
+            c.working
+        )
+        .unwrap();
+        for n in &c.held {
+            write!(out, "<td class=\"num\">{n}</td>").unwrap();
+        }
+        write!(out, "<td class=\"num\">{}</td></tr>", c.closed).unwrap();
+    }
+    out.push_str("</tbody></table></div></section>");
+    out
+}
+
 fn ready_next(s: &beads::Snapshot) -> String {
     let selected: Vec<&Bead> = s.ready.iter().filter_map(|id| s.get(id)).take(50).collect();
     let mut out = format!(
-        "<section id=\"next\"><div class=\"section-heading\"><div><h2>Ready next</h2><p class=\"muted\">The first {} of {} ready beads, in the order bd ready returns them, grouped by parent.</p></div><a href=\"/beads?state=ready\">Browse every ready bead →</a></div>",
+        "<section id=\"next\"><div class=\"section-heading\"><div><h2>Ready next</h2><p class=\"muted\">The first {} of {} ready beads, in the order bd ready returns them, grouped by parent.</p></div><a href=\"/beads?ready=yes\">Browse every ready bead →</a></div>",
         selected.len(),
         s.ready.len()
     );
@@ -157,41 +228,81 @@ fn knowledge(s: &scrolls::Snapshot) -> String {
     out
 }
 
-/// Beads in progress with where each is up to. A bead whose log is read and
-/// empty (an epic, say) has nothing to show, so it is left out.
-fn in_progress(view: &View, s: &beads::Snapshot) -> String {
-    let Some(trails) = &view.provenance else {
-        return String::new();
-    };
+/// Work under way: beads in progress with where each is up to, then held
+/// beads (in a state that overrides ready) marked as stopped, with the
+/// state's banner line. A bead in progress whose log is read and empty (an
+/// epic, say) has nothing to show, so it is left out; without a local `bd`
+/// only held beads show.
+fn under_way(view: &View, s: &beads::Snapshot, hold: &[&StateRule]) -> String {
+    const ROWS: usize = 50;
+    let trails = view.provenance.as_ref();
     let now = chrono::Utc::now();
-    let rows: Vec<(&Bead, String)> = s
-        .ordered()
-        .filter(|b| b.status == "in_progress")
-        .filter_map(|bead| {
+    let mut working: Vec<(&Bead, String)> = Vec::new();
+    let mut held: Vec<(&Bead, String)> = Vec::new();
+    for &i in &s.order {
+        if !s.derived.is_item(i) {
+            continue;
+        }
+        let bead = &s.beads[i];
+        if bead.status == "in_progress" {
+            let Some(trails) = trails else { continue };
+            if working.len() >= ROWS {
+                continue;
+            }
             let stage = match compact(trails, bead, now) {
                 Some((bar, line)) => format!("{bar}<small>{line}</small>"),
-                None if trails.get(&bead.id).is_some() => return None,
+                None if trails.get(&bead.id).is_some() => continue,
                 None => "<small>Reading the provenance log…</small>".to_string(),
             };
-            Some((bead, stage))
-        })
-        .take(50)
-        .collect();
-    if rows.is_empty() {
+            working.push((bead, stage));
+            continue;
+        }
+        let Some(state) = s.derived.rows[i]
+            .states
+            .iter()
+            .find_map(|k| hold.iter().find(|h| &h.key == k))
+        else {
+            continue;
+        };
+        if held.len() >= ROWS {
+            continue;
+        }
+        let mut stage = tone_badge(&state.label, state.tone);
+        if let Some((bar, line)) = trails.and_then(|t| compact(t, bead, now)) {
+            write!(stage, "{bar}<small>{line}</small>").unwrap();
+        }
+        if let Some(line) = view.profile.banner(&state.key, bead) {
+            write!(
+                stage,
+                "<small class=\"stop-line\">{}</small>",
+                escape(&line)
+            )
+            .unwrap();
+        }
+        held.push((bead, stage));
+    }
+    if working.is_empty() && held.is_empty() {
         return String::new();
     }
+    let held_words = if held.is_empty() {
+        String::new()
+    } else {
+        format!(" and {} held", held.len())
+    };
     let mut out = format!(
-        "<section id=\"in-progress\"><div class=\"section-heading\"><div><h2>In progress</h2><p class=\"muted\">Where {} beads in progress are up to, from their provenance logs.</p></div><a href=\"/beads?state=in_progress\">Browse every bead in progress →</a></div><div class=\"table-wrap\"><table class=\"items progress-list\"><thead><tr><th>Bead</th><th>Stage</th></tr></thead><tbody>",
-        rows.len()
+        "<section id=\"in-progress\"><div class=\"section-heading\"><div><h2>Under way</h2><p class=\"muted\">Where {} beads in progress{held_words} are up to, from their provenance logs.</p></div><a href=\"/beads?state=in_progress\">Browse every bead in progress →</a></div><div class=\"table-wrap\"><table class=\"items progress-list\"><thead><tr><th>Bead</th><th>Stage</th></tr></thead><tbody>",
+        working.len()
     );
-    for (bead, stage) in rows {
-        write!(
-            out,
-            "<tr><td>{}<small>{}</small></td><td>{stage}</td></tr>",
-            bead_link(&bead.id, &bead.title),
-            escape(&bead.id)
-        )
-        .unwrap();
+    for (rows, class) in [(working, ""), (held, " class=\"stopped\"")] {
+        for (bead, stage) in rows {
+            write!(
+                out,
+                "<tr{class}><td>{}<small>{}</small></td><td>{stage}</td></tr>",
+                bead_link(&bead.id, &bead.title),
+                escape(&bead.id)
+            )
+            .unwrap();
+        }
     }
     out.push_str("</tbody></table></div></section>");
     out
@@ -200,7 +311,8 @@ fn in_progress(view: &View, s: &beads::Snapshot) -> String {
 #[cfg(test)]
 mod tests {
     use super::{forecast_values, overview};
-    use crate::model::{BeadFilter, Feed};
+    use crate::model::Feed;
+    use crate::query::Facets;
     use crate::render::beads;
     use crate::render::tests::{view, with_trail};
     use std::sync::Arc;
@@ -236,7 +348,37 @@ mod tests {
             !overview(&empty).contains("id=\"in-progress\""),
             "a bead with an empty log is left out"
         );
-        assert!(beads(&v, &BeadFilter::default()).contains("class=\"stage-mini\""));
+        assert!(beads(&v, &Facets::default()).contains("class=\"stage-mini\""));
+    }
+
+    #[test]
+    fn the_profiled_overview_counts_items_and_shows_held_work_under_way() {
+        let view = crate::testing::work_view();
+        let page = overview(&view);
+        // 6 open items; receipts (wk-op-2 is open-ish data) and hidden rows
+        // (wk-slot is open) are not counted.
+        assert!(
+            page.contains("<span>Open beads</span><strong>6</strong>"),
+            "{page}"
+        );
+        assert!(page.contains(
+            "<a class=\"metric\" href=\"/beads?dstate=held\"><span>Held</span><strong>1</strong>"
+        ));
+        assert!(page.contains("<h2>Under way</h2>"));
+        let held = page
+            .split("<tr class=\"stopped\">")
+            .nth(1)
+            .expect("a held row");
+        assert!(
+            held.contains("WORK-0003") || held.contains("wk-3"),
+            "{held}"
+        );
+        assert!(held.contains("Held since 2026-11-15T09:15:00Z: scope-exceeded (scope)"));
+        assert!(page.contains("href=\"/beads?ready=yes\">Browse every ready bead"));
+        assert!(!page.contains("state=ready"));
+        assert!(page.contains("<h2>By milestone</h2>"));
+        assert!(page.contains("href=\"/by/milestone/v1\""));
+        assert!(!page.contains(" style="));
     }
 
     #[test]
