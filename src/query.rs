@@ -4,13 +4,6 @@
 //! (`Query<Facets>`), filters with `Facets::matches`, and builds its links
 //! with `href` so the filters a person chose follow them from tab to tab.
 //! Keys a profile's `[[groups]]` define arrive in `Facets::groups`.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "contract the packages call; every list page of WP1–WP6 filters with it (BKLG-20261115-4e2r)"
-    )
-)]
 
 use crate::model::View;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
