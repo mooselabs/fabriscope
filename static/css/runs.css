@@ -13,18 +13,6 @@
 table.runs td:first-child {
   white-space:nowrap;
 }
-.chip {
-  display:inline-block;
-  border:1px solid var(--line);
-  border-radius:999px;
-  padding:1px 8px;
-  margin:1px 0;
-  font-size:12px;
-  white-space:nowrap;
-  max-width:100%;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
 .run-meta {
   display:flex;
   flex-wrap:wrap;

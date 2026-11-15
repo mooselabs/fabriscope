@@ -136,9 +136,6 @@ ol.timeline .changes {
 ol.timeline .comment p {
   margin:4px 0;
 }
-ol.timeline > li {
-  overflow-wrap:anywhere;
-}
 ol.timeline small a {
   color:inherit;
 }

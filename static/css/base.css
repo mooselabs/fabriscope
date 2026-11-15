@@ -1058,6 +1058,7 @@ ol.timeline > li {
   position:relative;
   padding:0 0 14px 6px;
   font-size:14px;
+  overflow-wrap:anywhere;
 }
 ol.timeline > li::before {
   content:"";
@@ -1129,4 +1130,22 @@ pre.json {
   .subnav {
     padding:8px 18px;
   }
+}
+/* A group value or other short fact beside a row (bead tables, runs, the
+   bead header). Long values are cut with an ellipsis; the title has them. */
+.chip {
+  display:inline-block;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:1px 8px;
+  margin:1px 0;
+  font-size:12px;
+  background:var(--badge-neutral-bg);
+  white-space:nowrap;
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.chip a {
+  color:var(--badge-neutral);
 }
