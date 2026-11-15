@@ -370,7 +370,7 @@ fn held_table(view: &View, state: &StateRule, items: &[usize], now: DateTime<Utc
     for fact in &state.facts {
         write!(out, "<th>{}</th>", escape(&fact_label(view, fact))).unwrap();
     }
-    out.push_str("<th>Held for</th><th>Attempt</th><th>Run</th></tr></thead><tbody>");
+    out.push_str("<th>Held for</th><th>Run</th></tr></thead><tbody>");
     // Longest held first.
     let mut items = items.to_vec();
     items.sort_by(|&a, &b| s.derived.rows[a].since.cmp(&s.derived.rows[b].since));
@@ -395,8 +395,10 @@ fn held_table(view: &View, state: &StateRule, items: &[usize], now: DateTime<Utc
             escape(reference)
         )
         .unwrap();
+        let mut shown = Vec::new();
         for fact in &state.facts {
             let text = fact.text(bead);
+            shown.extend(text.clone());
             write!(
                 out,
                 "<td>{}</td>",
@@ -413,16 +415,19 @@ fn held_table(view: &View, state: &StateRule, items: &[usize], now: DateTime<Utc
             None => super::unknown().into(),
         };
         let joined = join(view, bead, state);
+        // The attempt joins the row to its run; it is named under the run
+        // unless a fact column already shows it.
         let attempt = match (&joined.attempt, joined.trail) {
-            (Some(a), _) => format!("<code>{}</code>", escape(a)),
+            (Some(a), _) if shown.contains(a) => String::new(),
+            (Some(a), _) => format!("<small>attempt <code>{}</code></small>", escape(a)),
             (None, false) if view.provenance.is_some() => {
-                "<span class=\"muted\">not read yet</span>".into()
+                "<small class=\"muted\">attempt not read yet</small>".into()
             }
-            _ => "<span class=\"muted\">—</span>".into(),
+            _ => String::new(),
         };
         write!(
             out,
-            "<td>{held_for}</td><td>{attempt}</td><td>{}</td></tr>",
+            "<td>{held_for}</td><td>{}{attempt}</td></tr>",
             run_cell(view, &joined)
         )
         .unwrap();
@@ -716,7 +721,12 @@ mod tests {
             page.contains("id=\"held-held-scope%2Dexceeded\""),
             "grouped by the first fact"
         );
-        assert!(page.contains("<code>att-0003-1</code>"));
+        assert!(page.contains("<td>att-0003-1</td>"), "the attempt fact");
+        assert_eq!(
+            page.matches("att-0003-1").count(),
+            1,
+            "a joined attempt a fact already shows is not repeated: {page}"
+        );
         assert!(page.contains("The change needs a file outside its write scope"));
         assert!(page.contains("Next: Widen the write scope"));
         assert!(page.contains("since <time"));

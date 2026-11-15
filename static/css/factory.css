@@ -40,6 +40,9 @@
 table.held td small,table.cost-items td small,table.receipts td small {
   margin-top:3px;
 }
+table.held td:nth-child(2) {
+  white-space:nowrap;
+}
 table.held .stop-note {
   margin-top:8px;
   min-width:220px;

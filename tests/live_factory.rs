@@ -56,7 +56,7 @@ fn held_costs_and_receipts_on_the_work_fixture() {
     // The feed client fetches held items' run docs ahead, so /held, which
     // never fetches, shows the run's stop without anyone opening it.
     let held = page_until(&server, "/held", |p| {
-        p.contains("<code>att-0003-1</code>")
+        p.contains("<td>att-0003-1</td>")
             && p.contains("The change needs a file outside its write scope")
     });
     assert!(held.contains("Move reports to the new table"), "{held}");

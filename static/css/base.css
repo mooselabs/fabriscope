@@ -620,6 +620,20 @@ figure {
   height:auto;
   min-height:130px;
 }
+/* Row charts are as tall as their rows; a floor would centre one bar in
+   empty space. */
+.chart.hbars,.chart.ranges {
+  min-height:0;
+}
+/* Row charts keep readable labels on a phone and scroll in their figure. */
+figure:has(> .chart.hbars),figure:has(> .chart.ranges) {
+  overflow-x:auto;
+}
+@media(max-width:700px) {
+  .chart.hbars,.chart.ranges {
+    min-width:900px;
+  }
+}
 .chart text {
   fill:var(--muted);
   font-size:12px;
@@ -1088,8 +1102,10 @@ table.data td.num,table.data th.num {
   font-variant-numeric:tabular-nums;
   white-space:nowrap;
 }
+/* Break a long word only when it cannot fit: a table keeps whole words and
+   scrolls inside its .table-wrap instead of splitting "implementer". */
 table.data td {
-  overflow-wrap:anywhere;
+  overflow-wrap:break-word;
 }
 ul.values {
   margin:0;
