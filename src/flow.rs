@@ -23,9 +23,6 @@ pub const DAILY_MAX_DAYS: i64 = 31;
 pub const STALE_DAYS: i64 = 7;
 /// Rows per page on the flow lists.
 pub const PAGE_SIZE: usize = 25;
-/// The query key of the breakdown selector. It is not a reserved key, so it
-/// arrives among `Facets::groups`; `scope` takes it out before filtering.
-pub const BY: &str = "by";
 
 /// A stored time as UTC: RFC 3339, `YYYY-MM-DD HH:MM:SS` (read as UTC) or a
 /// bare `YYYY-MM-DD` (its midnight). Anything else is no time at all.
@@ -472,28 +469,9 @@ impl<'v> Item<'v> {
     }
 }
 
-/// The breakdown key the query asks for, unless a profile group is itself
-/// called `by` (then it is that group's filter).
-pub fn by_param<'f>(view: &View, facets: &'f Facets) -> Option<&'f str> {
-    if view.profile.group(BY).is_some() {
-        return None;
-    }
-    facets.groups.get(BY).map(String::as_str)
-}
-
-/// The facets for links that leave the flow pages: without the breakdown
-/// key, which other pages would read as a group filter.
-pub fn outside(view: &View, facets: &Facets) -> Facets {
-    let mut f = facets.clone();
-    if view.profile.group(BY).is_none() {
-        f.groups.remove(BY);
-    }
-    f
-}
-
 /// The items the facets select, before the flow's own rules: an empty
-/// `state` means every status (flow counts closed work), the breakdown key
-/// is not a filter, and `person` also matches the creator and the claimant.
+/// `state` means every status (flow counts closed work) and `person` also
+/// matches the creator and the claimant.
 fn selected<'v>(
     view: &'v View,
     facets: &Facets,
@@ -503,10 +481,7 @@ fn selected<'v>(
     let Some(s) = view.snapshot() else {
         return Vec::new();
     };
-    let mut base = outside(view, facets);
-    if base.state.is_empty() {
-        base.state = "all".into();
-    }
+    let mut base = facets.any_status();
     let person = std::mem::take(&mut base.person);
     let mut out = Vec::new();
     for (index, bead) in s.beads.iter().enumerate() {
@@ -739,8 +714,10 @@ impl By {
     /// type. An unknown name falls back the same way.
     pub fn chosen(view: &View, facets: &Facets) -> By {
         let options = By::options(view);
-        by_param(view, facets)
-            .and_then(|key| options.iter().find(|o| o.key() == key).cloned())
+        options
+            .iter()
+            .find(|o| o.key() == facets.by)
+            .cloned()
             .unwrap_or_else(|| options[0].clone())
     }
 

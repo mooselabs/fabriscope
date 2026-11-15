@@ -364,15 +364,13 @@ fn filters(cx: &Ctx) -> String {
         let current = f.groups.get(&group.key).map(String::as_str).unwrap_or("");
         out.push_str(&select(&group.key, &group.label, current, &values));
     }
-    let mut hidden: Vec<(&str, &str)> = vec![
+    let hidden: [(&str, &str); 5] = [
         ("dstate", &f.dstate),
         ("ready", &f.ready),
         ("epic", &f.epic),
         ("sort", &f.sort),
+        ("by", &f.by),
     ];
-    if let Some(by) = flow::by_param(view, f) {
-        hidden.push((flow::BY, by));
-    }
     for (name, value) in hidden.into_iter().filter(|(_, v)| !v.is_empty()) {
         write!(
             out,
@@ -422,8 +420,8 @@ fn range_lede(cx: &Ctx, what: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn overview(cx: &Ctx) -> (String, String) {
-    let view = cx.view;
-    let outside = flow::outside(view, cx.facets);
+    // A tile names its status, so the list it opens means the same items.
+    let outside = cx.facets.without(&["by"]);
     let mut body = "<section id=\"flow-status\"><h2>Status now</h2><p class=\"muted\">Every counted item, whatever the range.</p>".to_string();
     let tiles: Vec<String> = flow::statuses(&cx.items)
         .into_iter()
@@ -883,7 +881,7 @@ fn cycle(cx: &Ctx) -> (String, String) {
         write!(
             body,
             "<a href=\"{}\"{here}>{}</a>",
-            escape(&href(cx.path, cx.facets, &[(flow::BY, option.key())])),
+            escape(&href(cx.path, cx.facets, &[("by", option.key())])),
             escape(&option.label(view))
         )
         .unwrap();

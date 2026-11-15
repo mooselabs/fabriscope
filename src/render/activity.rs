@@ -27,11 +27,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write;
 
-/// The query key of the event-kind filter. It is not a reserved facet key,
-/// so it arrives among `Facets::groups`; a profile group with this key
-/// wins over it.
-pub(crate) const EVENT_KEY: &str = "event";
-
 /// Days shown when the query names no range.
 const DEFAULT_DAYS: u32 = 7;
 
@@ -164,8 +159,7 @@ fn newest_first(a: &Entry, b: &Entry) -> Ordering {
 /// What the filters ask of an entry, worked out once per request.
 pub(crate) struct Filter {
     /// The facets that select items: `person` removed (here it means the
-    /// actor), `state` defaulting to every state, and the event key removed
-    /// unless a profile group owns it.
+    /// actor) and `state` defaulting to every state.
     items: Facets,
     /// Whether any item facet is set (an entry with no item then fails).
     narrowed: bool,
@@ -175,35 +169,13 @@ pub(crate) struct Filter {
 }
 
 impl Filter {
-    pub(crate) fn new(view: &View, facets: &Facets, now: DateTime<Utc>) -> Self {
-        let mut items = facets.clone();
-        items.person.clear();
-        items.page.clear();
-        let mut event = None;
-        if view.profile.group(EVENT_KEY).is_none() {
-            event = items.groups.remove(EVENT_KEY).filter(|e| !e.is_empty());
-        }
-        let narrowed = !items.state.is_empty()
-            || [
-                &items.q,
-                &items.issue_type,
-                &items.kind,
-                &items.priority,
-                &items.dstate,
-                &items.ready,
-                &items.epic,
-            ]
-            .iter()
-            .any(|v| !v.is_empty())
-            || !items.groups.is_empty();
-        if items.state.is_empty() {
-            items.state = "all".into();
-        }
+    pub(crate) fn new(facets: &Facets, now: DateTime<Utc>) -> Self {
+        let items = facets.without(&["person", "page", "event"]).any_status();
         Filter {
+            narrowed: !facets.state.is_empty() || facets.selects_items(),
             items,
-            narrowed,
             person: Some(facets.person.clone()).filter(|p| !p.is_empty()),
-            event,
+            event: Some(facets.event.clone()).filter(|e| !e.is_empty()),
             bounds: range(facets).bounds(now),
         }
     }
@@ -524,7 +496,7 @@ pub(crate) fn recent(view: &View, facets: &Facets, limit: usize) -> (String, usi
     let Some(s) = view.snapshot() else {
         return (String::new(), 0);
     };
-    let filter = Filter::new(view, facets, Utc::now());
+    let filter = Filter::new(facets, Utc::now());
     let mut timeline = collect(view, s, &filter);
     let total = timeline.len();
     let shown = timeline.page(0, limit);
@@ -586,12 +558,8 @@ pub(crate) fn filter_form(
         }
         out.push_str(&select("person", "Person", &facets.person, &options));
     }
-    if let Some(kinds) = kinds.filter(|_| view.profile.group(EVENT_KEY).is_none()) {
-        let current = facets
-            .groups
-            .get(EVENT_KEY)
-            .map(String::as_str)
-            .unwrap_or("");
+    if let Some(kinds) = kinds {
+        let current = facets.event.as_str();
         let mut options = any("Any event");
         options.extend(
             kinds
@@ -601,7 +569,7 @@ pub(crate) fn filter_form(
         if !current.is_empty() && !kinds.contains_key(current) {
             options.push((current.to_string(), kind_label(view, current)));
         }
-        out.push_str(&select(EVENT_KEY, "Event", current, &options));
+        out.push_str(&select("event", "Event", current, &options));
     }
     if !view.profile.kinds.is_empty() {
         let mut options = any("All kinds");
@@ -643,7 +611,7 @@ pub(crate) fn activity(view: &View, facets: &Facets) -> String {
         return super::layout::not_found(view);
     };
     let now = Utc::now();
-    let filter = Filter::new(view, facets, now);
+    let filter = Filter::new(facets, now);
     let mut timeline = collect(view, s, &filter);
     let mut body = heading(
         "Work",
@@ -706,7 +674,7 @@ mod tests {
 
     fn kinds(view: &View, query: &str) -> Vec<String> {
         let s = view.snapshot().unwrap();
-        let filter = Filter::new(view, &facets(query), Utc::now());
+        let filter = Filter::new(&facets(query), Utc::now());
         let mut t = collect(view, s, &filter);
         let n = t.len();
         t.page(0, n)
@@ -748,7 +716,7 @@ mod tests {
         assert_eq!(all, kinds(&view, "from=2026-10-01&to=2026-11-30"));
         // Paging orders only what it shows, and agrees with the full order.
         let s = view.snapshot().unwrap();
-        let filter = Filter::new(&view, &facets("from=2026-10-01&to=2026-11-30"), Utc::now());
+        let filter = Filter::new(&facets("from=2026-10-01&to=2026-11-30"), Utc::now());
         let mut t = collect(&view, s, &filter);
         let second: Vec<&str> = t.page(1, 3).iter().map(|e| e.at_text).collect();
         assert_eq!(second, times[3..6]);
@@ -776,7 +744,7 @@ mod tests {
         );
         assert!(!rig_b.iter().any(|k| k.starts_with("authored@")));
         // The default range is the last seven days.
-        let (from, _) = Filter::new(&view, &Facets::default(), Utc::now()).bounds;
+        let (from, _) = Filter::new(&Facets::default(), Utc::now()).bounds;
         assert_eq!(
             from,
             Some(Utc::now().date_naive() - chrono::Duration::days(6))

@@ -24,10 +24,6 @@ use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-/// The query key choosing what rows group by: a fact source as the profile
-/// writes it, or `group:<key>`.
-const BY: &str = "by";
-
 /// Rows a stop-history list shows, newest first.
 const SHOWN: usize = 50;
 
@@ -194,13 +190,9 @@ fn grouping<'a>(view: &'a View, state: &'a StateRule, by: &str) -> Grouping<'a> 
 /// `/held`.
 pub(crate) fn held(view: &View, facets: &Facets) -> String {
     let p = &view.profile;
-    let mut facets = facets.clone();
-    // `by` is this page's own key unless a profile group took the name.
-    let by = if p.group(BY).is_none() {
-        facets.groups.remove(BY).unwrap_or_default()
-    } else {
-        String::new()
-    };
+    // `by` chooses what rows group by: a fact source as the profile writes
+    // it, or `group:<key>`.
+    let by = facets.by.as_str();
     let held: Vec<&StateRule> = p
         .states
         .iter()
@@ -232,7 +224,7 @@ pub(crate) fn held(view: &View, facets: &Facets) -> String {
             }
         }
     }
-    body.push_str(&facets_form(view, &facets, "/held"));
+    body.push_str(&facets_form(view, facets, "/held"));
     // Tiles: each state, then the commonest values of the first state's
     // first fact.
     let mut cards: Vec<(&str, String, String)> = held
@@ -277,11 +269,11 @@ pub(crate) fn held(view: &View, facets: &Facets) -> String {
             |v| format!("{v:.0}"),
         ));
     }
-    body.push_str(&group_form(view, &held, &facets, &by));
+    body.push_str(&group_form(view, &held, facets, by));
     for (state, members) in held.iter().zip(&rows) {
-        body.push_str(&state_section(view, state, members, &by, now));
+        body.push_str(&state_section(view, state, members, by, now));
     }
-    body.push_str(&stop_history(view, &facets, now));
+    body.push_str(&stop_history(view, facets, now));
     page(view, "Held", "/held", &body)
 }
 
@@ -311,10 +303,10 @@ fn group_form(view: &View, held: &[&StateRule], facets: &Facets, by: &str) -> St
         "<form class=\"filters held-controls\" action=\"/held\" method=\"get\">".to_string();
     if !options.is_empty() {
         let current = if by.is_empty() { &options[0].0 } else { by };
-        out.push_str(&select(BY, "Group by", current, &options));
+        out.push_str(&select("by", "Group by", current, &options));
     }
     out.push_str(&range_controls(facets));
-    out.push_str(&hidden(facets, &["days", "from", "to"]));
+    out.push_str(&hidden(facets, &["days", "from", "to", "by"]));
     out.push_str("<button type=\"submit\">Apply</button></form>");
     out
 }

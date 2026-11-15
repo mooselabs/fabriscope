@@ -30,17 +30,8 @@ const RECENT: usize = 50;
 
 /// The facets that select items: every state unless one is named, and no
 /// person (pages here filter by person themselves).
-fn item_facets(view: &View, facets: &Facets) -> Facets {
-    let mut items = facets.clone();
-    items.person.clear();
-    items.page.clear();
-    if view.profile.group(activity::EVENT_KEY).is_none() {
-        items.groups.remove(activity::EVENT_KEY);
-    }
-    if items.state.is_empty() {
-        items.state = "all".into();
-    }
-    items
+fn item_facets(facets: &Facets) -> Facets {
+    facets.without(&["person", "page"]).any_status()
 }
 
 /// What one person did, as `/people` counts it.
@@ -128,7 +119,7 @@ impl<'a> Names<'a> {
 
 fn tallies(view: &View, s: &Snapshot, facets: &Facets) -> BTreeMap<String, Tally> {
     let roles = &view.profile.people.roles;
-    let items = item_facets(view, facets);
+    let items = item_facets(facets);
     let bounds = range(facets).bounds(Utc::now());
     let mut out: BTreeMap<String, Tally> = BTreeMap::new();
     let entry = |out: &mut BTreeMap<String, Tally>, name: &str| {
@@ -197,19 +188,7 @@ fn tallies(view: &View, s: &Snapshot, facets: &Facets) -> BTreeMap<String, Tally
 /// Whether the query narrows the items (then only people tied to those
 /// items are listed).
 fn item_narrowed(facets: &Facets) -> bool {
-    [
-        &facets.q,
-        &facets.issue_type,
-        &facets.kind,
-        &facets.priority,
-        &facets.state,
-        &facets.dstate,
-        &facets.ready,
-        &facets.epic,
-    ]
-    .iter()
-    .any(|v| !v.is_empty())
-        || facets.groups.keys().any(|k| k != activity::EVENT_KEY)
+    !facets.state.is_empty() || facets.selects_items()
 }
 
 /// A class as a table heading: `person` → People, `seat` → Seats.
@@ -358,7 +337,7 @@ pub(crate) fn person(view: &View, name: &str, facets: &Facets) -> Option<String>
         return None;
     }
     let class = view.profile.person(name).class;
-    let items = item_facets(view, facets);
+    let items = item_facets(facets);
     let roles = &view.profile.people.roles;
     // Holding now, then each profile role.
     let mut lists: Vec<(String, Vec<usize>)> = vec![("Holding now".into(), Vec::new())];

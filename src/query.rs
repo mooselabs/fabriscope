@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 /// Query keys Fabriscope owns. A profile group may not use one.
 pub const RESERVED: &[&str] = &[
     "q", "type", "kind", "priority", "state", "dstate", "ready", "person", "epic", "page", "from",
-    "to", "days", "sort",
+    "to", "days", "sort", "by", "event",
 ];
 
 /// The filters of a list page. Every field is the raw query text (empty
@@ -30,7 +30,12 @@ pub struct Facets {
     /// A profile kind key.
     pub kind: String,
     pub priority: String,
-    /// A stored status, `all`, or empty for every bead not closed.
+    /// A stored status or `all`. What an empty value means is the page's
+    /// choice, and differs: the lists (`/beads`, `/epics`, `/held`, `/by/…`)
+    /// read it as every item not closed, through `matches`; the pages that
+    /// count over time (`/flow/…`, `/activity`, `/people`) read it as any
+    /// status, through `any_status`. A link from one kind of page to the
+    /// other states its `state` (see `any_status`) so its meaning holds.
     pub state: String,
     /// A profile state key (derived state).
     pub dstate: String,
@@ -46,6 +51,11 @@ pub struct Facets {
     pub to: String,
     pub days: String,
     pub sort: String,
+    /// What a breakdown groups by (`/flow/…`, `/held`); each page reads its
+    /// own values and ignores one it does not know.
+    pub by: String,
+    /// An event kind (`/activity`).
+    pub event: String,
     /// Profile group key → value.
     pub groups: BTreeMap<String, String>,
 }
@@ -54,29 +64,13 @@ impl From<Vec<(String, String)>> for Facets {
     fn from(pairs: Vec<(String, String)>) -> Self {
         let mut f = Facets::default();
         for (key, value) in pairs {
-            let slot = match key.as_str() {
-                "q" => &mut f.q,
-                "type" => &mut f.issue_type,
-                "kind" => &mut f.kind,
-                "priority" => &mut f.priority,
-                "state" => &mut f.state,
-                "dstate" => &mut f.dstate,
-                "ready" => &mut f.ready,
-                "person" => &mut f.person,
-                "epic" => &mut f.epic,
-                "page" => &mut f.page,
-                "from" => &mut f.from,
-                "to" => &mut f.to,
-                "days" => &mut f.days,
-                "sort" => &mut f.sort,
-                _ => {
-                    if !value.is_empty() {
-                        f.groups.insert(key, value);
-                    }
-                    continue;
+            match f.slot(&key) {
+                Some(slot) => *slot = value,
+                None if !value.is_empty() => {
+                    f.groups.insert(key, value);
                 }
-            };
-            *slot = value;
+                None => {}
+            }
         }
         f
     }
@@ -114,6 +108,8 @@ impl Facets {
             ("to", &self.to),
             ("days", &self.days),
             ("sort", &self.sort),
+            ("by", &self.by),
+            ("event", &self.event),
         ];
         fixed
             .into_iter()
@@ -121,6 +117,75 @@ impl Facets {
             .chain(self.groups.iter().map(|(k, v)| (k.clone(), v.clone())))
             .filter(|(_, v)| !v.is_empty())
             .collect()
+    }
+
+    /// The field a reserved query key fills; `None` for a group key.
+    fn slot(&mut self, key: &str) -> Option<&mut String> {
+        Some(match key {
+            "q" => &mut self.q,
+            "type" => &mut self.issue_type,
+            "kind" => &mut self.kind,
+            "priority" => &mut self.priority,
+            "state" => &mut self.state,
+            "dstate" => &mut self.dstate,
+            "ready" => &mut self.ready,
+            "person" => &mut self.person,
+            "epic" => &mut self.epic,
+            "page" => &mut self.page,
+            "from" => &mut self.from,
+            "to" => &mut self.to,
+            "days" => &mut self.days,
+            "sort" => &mut self.sort,
+            "by" => &mut self.by,
+            "event" => &mut self.event,
+            _ => return None,
+        })
+    }
+
+    /// These facets without `keys` (reserved or group keys), for a link
+    /// that leaves a page whose own keys mean nothing elsewhere.
+    pub fn without(&self, keys: &[&str]) -> Facets {
+        let mut f = self.clone();
+        for key in keys {
+            match f.slot(key) {
+                Some(slot) => slot.clear(),
+                None => {
+                    f.groups.remove(*key);
+                }
+            }
+        }
+        f
+    }
+
+    /// Whether a facet that picks items by what they are is set: text,
+    /// type, kind, priority, derived state, ready, epic or a group. Not the
+    /// stored state, person, dates, sort, page or a page's own keys, whose
+    /// meaning differs by page; a caller adds those it means.
+    pub fn selects_items(&self) -> bool {
+        [
+            &self.q,
+            &self.issue_type,
+            &self.kind,
+            &self.priority,
+            &self.dstate,
+            &self.ready,
+            &self.epic,
+        ]
+        .iter()
+        .any(|v| !v.is_empty())
+            || !self.groups.is_empty()
+    }
+
+    /// These facets with an empty `state` made explicit as `all`: what a
+    /// page that counts over time means by it, and what a link from such a
+    /// page to a list must say so the list does not narrow to work not
+    /// closed.
+    pub fn any_status(&self) -> Facets {
+        let mut f = self.clone();
+        if f.state.is_empty() {
+            f.state = "all".into();
+        }
+        f
     }
 
     /// Whether bead `index` of the view's snapshot passes every facet.
@@ -279,6 +344,27 @@ mod tests {
         );
         assert_eq!(href("/", &Facets::default(), &[]), "/");
         assert_eq!(facets("page=-1").page(), 0);
+    }
+
+    #[test]
+    fn every_reserved_key_has_a_field_and_page_keys_can_be_dropped() {
+        for key in RESERVED {
+            assert!(Facets::default().slot(key).is_some(), "{key}");
+        }
+        let f = facets("by=group%3Aarea&event=claim&area=ui&q=x");
+        assert_eq!((f.by.as_str(), f.event.as_str()), ("group:area", "claim"));
+        assert_eq!(f.groups.len(), 1, "by and event are not group filters");
+        assert_eq!(
+            href("/flow", &f, &[]),
+            "/flow?q=x&by=group%3Aarea&event=claim&area=ui"
+        );
+        assert_eq!(
+            href("/beads", &f.without(&["by", "event", "area"]), &[]),
+            "/beads?q=x"
+        );
+        assert!(f.selects_items() && !facets("person=a&state=all&by=x").selects_items());
+        assert_eq!(f.any_status().state, "all");
+        assert_eq!(facets("state=open").any_status().state, "open");
     }
 
     #[test]

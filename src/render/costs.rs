@@ -106,19 +106,7 @@ pub(super) fn tiles(cards: &[(&str, String, String)]) -> String {
 
 /// Whether any facet that picks items (not dates, sort or page) is set.
 pub(super) fn picks_items(facets: &Facets) -> bool {
-    [
-        &facets.q,
-        &facets.issue_type,
-        &facets.kind,
-        &facets.priority,
-        &facets.dstate,
-        &facets.ready,
-        &facets.person,
-        &facets.epic,
-    ]
-    .iter()
-    .any(|v| !v.is_empty())
-        || !facets.groups.is_empty()
+    !facets.person.is_empty() || facets.selects_items()
 }
 
 fn dollars(usd: Option<f64>, partial: bool) -> String {
