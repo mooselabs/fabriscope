@@ -35,6 +35,7 @@ case "$1" in
   export) cat issues.jsonl ;;
   ready) echo '[{"id":"demo-1"}]' ;;
   vc) cat commit.json ;;
+  provenance) if [ "$5" = demo-1 ]; then cat provenance.json; else echo '[]'; fi ;;
   *) exit 2 ;;
 esac
 ''')
@@ -43,6 +44,7 @@ esac
         shutil.copy(ROOT / 'tests/fixtures/scrolls.py', scrolls)
         scrolls.chmod(0o755)
         shutil.copy(ROOT / 'tests/fixtures/graph.json', store / 'graph.json')
+        shutil.copy(ROOT / 'tests/fixtures/provenance.json', store / 'provenance.json')
         (store / '.scrolls').mkdir()
         with (store / 'server.log').open('w+') as log:
             server = subprocess.Popen([
@@ -143,7 +145,8 @@ def run_browser(args, url, issues, store):
                     ['--ink','--table-head'],['--ink','--row-hover'],['--ink','--code-bg'],
                     ['--badge-blue','--badge-blue-bg'],['--badge-green','--badge-green-bg'],
                     ['--badge-amber','--badge-amber-bg'],['--badge-neutral','--badge-neutral-bg'],
-                    ['--alert-ink','--alert-bg'],['--button-ink','--ink']].map(([a,b]) => {
+                    ['--alert-ink','--alert-bg'],['--button-ink','--ink'],
+                    ['--red','--paper'],['--red-ink','--red-bg']].map(([a,b]) => {
                       const x=color(a), y=color(b);
                       return [a,b,(Math.max(x,y)+.05)/(Math.min(x,y)+.05)];
                     });
@@ -156,6 +159,17 @@ def run_browser(args, url, issues, store):
                     if args.screenshots and width in [1440, 375]:
                         args.screenshots.mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=str(args.screenshots / f'{theme}-{width}.png'), full_page=True)
+            # The stage bar reads in the background, then fits every width.
+            page.goto(url + '/bead/demo-1')
+            expect(page.locator('#progress > .stages')).to_be_visible(timeout=15000)
+            expect(page.locator('#progress > .stages > .stage.done')).to_have_count(5)
+            for width in [1440, 768, 375, 320]:
+                page.set_viewport_size({'width': width, 'height': 1000})
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), ('stages', width)
+                if args.screenshots and width in [1440, 375]:
+                    page.screenshot(path=str(args.screenshots / f'stages-{width}.png'), full_page=True)
+            page.set_viewport_size({'width': 1440, 'height': 1000})
+            page.goto(url)
             page.evaluate("localStorage.setItem('fabriscope.theme', 'invalid')")
             page.reload()
             expect(control).to_have_value('system')

@@ -26,6 +26,9 @@ case "$1" in
   vc) cat commit.json ;;
   export) cat issues.jsonl ;;
   ready) cat ready.json ;;
+  provenance)
+    # bd provenance log --json -- <id>
+    if [ -f "provenance-$5.json" ]; then cat "provenance-$5.json"; else echo '[]'; fi ;;
   *) echo "unexpected bd $*" >&2; exit 2 ;;
 esac
 "#;
@@ -85,6 +88,11 @@ fn store(name: &str) -> Store {
     )
     .unwrap();
     std::fs::write(beads.join("ready.json"), r#"[{"id":"demo-1"}]"#).unwrap();
+    std::fs::write(
+        beads.join("provenance-demo-1.json"),
+        fixture("provenance.json"),
+    )
+    .unwrap();
     std::fs::write(tools.join("graph.json"), fixture("graph.json")).unwrap();
     script(&tools.join("bd"), FAKE_BD);
     script(&tools.join("scrolls"), FAKE_SCROLLS);
@@ -317,6 +325,38 @@ fn check_pages(server: &Server) {
             .contains("1 matching scrolls")
     );
     assert_eq!(get(server, "/bead/nope").0, 404);
+    check_progress(server);
+}
+
+/// The bead pages above asked for their provenance; it arrives in the
+/// background and the page shows where each bead is up to.
+fn check_progress(server: &Server) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let page = loop {
+        let (_, page) = get(server, "/bead/demo-1");
+        if page.contains("class=\"stage done\"") {
+            break page;
+        }
+        assert!(Instant::now() < deadline, "no stages: {page}");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(page.contains("Claimed 2 times"), "{page}");
+    assert!(page.contains("Earlier attempts · 1"));
+    assert!(page.contains("stop code <strong>tests_failed</strong>"));
+    assert!(page.contains(">PR #7</a>"));
+    assert!(page.contains("Closed is next"));
+    assert!(page.contains("Provenance log · 8 events"));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (_, page) = get(server, "/bead/demo-2");
+        if page.contains("No provenance recorded for this bead.") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no empty log: {page}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let (_, health) = get(server, "/healthz");
+    assert!(health.contains("\"failed\":0"), "{health}");
 }
 
 #[test]
@@ -425,6 +465,10 @@ fn attaches_to_a_running_bd_serve_with_a_token() {
     ]);
     let (_, page) = get(&server, "/");
     assert!(page.contains("Write the README"));
+    assert!(
+        !get(&server, "/bead/demo-1").1.contains("id=\"progress\""),
+        "no local bd, so no provenance"
+    );
     assert!(
         !page.contains("href=\"/scrolls\""),
         "no Scrolls store, no Scrolls tab"

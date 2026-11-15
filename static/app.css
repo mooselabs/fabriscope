@@ -27,6 +27,9 @@
   --alert-bg:#fff0dc;
   --alert-ink:#75410a;
   --alert-border:#c78326;
+  --red:#b42318;
+  --red-bg:#fdecea;
+  --red-ink:#8a1c12;
   font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   font-size:15px;
   line-height:1.55;
@@ -62,6 +65,9 @@
   --alert-bg:#49341e;
   --alert-ink:#ffdb9d;
   --alert-border:#d99b4b;
+  --red:#ff9e94;
+  --red-bg:#4a2424;
+  --red-ink:#ffc9c2;
 }
 @media(prefers-color-scheme:dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
@@ -93,6 +99,9 @@
     --alert-bg:#49341e;
     --alert-ink:#ffdb9d;
     --alert-border:#d99b4b;
+  --red:#ff9e94;
+  --red-bg:#4a2424;
+  --red-ink:#ffc9c2;
   }
 }
 * {
@@ -759,4 +768,189 @@ figcaption {
 aside code {
   font-size:12px;
   overflow-wrap:anywhere;
+}
+
+.sr-only {
+  position:absolute;
+  width:1px;
+  height:1px;
+  overflow:hidden;
+  clip:rect(0 0 0 0);
+  white-space:nowrap;
+}
+.progress {
+  margin-top:0;
+}
+.progress h2 {
+  margin-bottom:6px;
+}
+.stages {
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  list-style:none;
+  margin:18px 0 12px;
+  padding:20px 18px 16px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:8px;
+}
+.stage {
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0;
+  padding-right:12px;
+  font-size:12px;
+  color:var(--muted);
+}
+.stage .dot {
+  position:relative;
+  z-index:1;
+  width:14px;
+  height:14px;
+  margin-bottom:8px;
+  border:2px solid var(--control-border);
+  border-radius:50%;
+  background:var(--paper);
+}
+/* The line from each step to the next; green once both are done. */
+.stage::before {
+  content:"";
+  position:absolute;
+  top:6px;
+  left:14px;
+  right:0;
+  height:2px;
+  background:var(--line);
+}
+.stage:last-child::before,.stage:nth-last-child(2)::before {
+  display:none;
+}
+.stage.done:has(+ .stage.done)::before {
+  background:var(--green);
+}
+.stage strong {
+  color:var(--ink);
+  font-size:13px;
+  font-weight:600;
+}
+.stage time {
+  font-variant-numeric:tabular-nums;
+}
+.stage .fact {
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.stage code.fact {
+  font-size:11px;
+}
+.stage.done .dot {
+  background:var(--green);
+  border-color:var(--green);
+}
+.stage.current .dot {
+  border-color:var(--blue);
+  box-shadow:0 0 0 4px var(--badge-blue-bg);
+}
+.stage.current strong {
+  color:var(--blue);
+}
+.stage.stopped .dot {
+  background:var(--red);
+  border-color:var(--red);
+}
+.stage.stopped strong {
+  color:var(--red);
+}
+.stage.pending strong,.stage.skipped strong {
+  color:var(--muted);
+  font-weight:500;
+}
+.stage.skipped .dot {
+  border-style:dashed;
+}
+/* Usage sits beside the steps, not on the line. */
+.stages:not(.compact) .stage:last-child {
+  border-left:1px dashed var(--line);
+  padding-left:14px;
+}
+.stages.compact {
+  display:inline-flex;
+  margin:6px 0 0;
+  padding:0;
+  border:0;
+  background:none;
+}
+.stages.compact .stage {
+  padding-right:8px;
+}
+.stages.compact .stage .dot {
+  width:10px;
+  height:10px;
+  margin:0;
+}
+.stages.compact .stage::before {
+  top:4px;
+  left:10px;
+  right:0;
+}
+.stages.compact .stage:last-child {
+  margin-left:6px;
+}
+.now {
+  font-size:14px;
+}
+.stop-note {
+  background:var(--red-bg);
+  color:var(--red-ink);
+  border-left:3px solid var(--red);
+  padding:12px 16px;
+  border-radius:4px;
+  font-size:13px;
+}
+.attempts {
+  list-style:none;
+  padding:0;
+}
+.attempts>li {
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:13px;
+}
+.attempts .stages.compact {
+  display:flex;
+}
+.log {
+  font-size:12px;
+}
+.log td {
+  overflow-wrap:anywhere;
+}
+.stage-mini small {
+  margin-top:2px;
+}
+.items.progress-list th:first-child,.items.progress-list td:first-child {
+  width:auto;
+}
+.items.progress-list th:last-child {
+  width:45%;
+}
+.progress code {
+  font-size:12px;
+}
+@media(max-width:700px) {
+  .stages:not(.compact) {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    row-gap:18px;
+  }
+  .stages:not(.compact) .stage::before {
+    display:none;
+  }
+  .stages:not(.compact) .stage:last-child {
+    border-left:0;
+    padding-left:0;
+  }
 }
